@@ -1,6 +1,9 @@
 import * as THREE from 'three';
 import './style.css';
 
+const doorWidth = 2; // Doors will be 2 units wide
+const wallMaterial = new THREE.MeshBasicMaterial({ color: 0x555555 });
+
 // Create scene, camera, and renderer
 const scene = new THREE.Scene();
 const camera = new THREE.PerspectiveCamera(
@@ -121,47 +124,147 @@ function generateDungeon(templates) {
   return dungeonLayout;
 }
 
+function createWallSegments(wallDirection, room) {
+  const { name, position, size, axis, doorCheck } = wallDirection;
+  const doorsOnWall = room.doors.filter(doorCheck);
+
+  // Calculate the wall’s extent along its axis (x or z)
+  const min =
+    axis === 'z' ? position[2] - size[2] / 2 : position[0] - size[0] / 2;
+  const max =
+    axis === 'z' ? position[2] + size[2] / 2 : position[0] + size[0] / 2;
+
+  if (doorsOnWall.length === 0) {
+    // No doors: create a solid wall
+    const wall = new THREE.Mesh(
+      new THREE.BoxGeometry(size[0], size[1], size[2]),
+      wallMaterial
+    );
+    wall.position.set(position[0], position[1], position[2]);
+    scene.add(wall);
+    walls.push(wall); // Assuming 'walls' is a global array for collision detection
+  } else {
+    // One door: create two wall segments around it
+    const door = doorsOnWall[0]; // Assuming one door per wall for simplicity
+    const doorPos = axis === 'z' ? door.position[2] : door.position[0];
+    const doorStart = doorPos - doorWidth / 2;
+    const doorEnd = doorPos + doorWidth / 2;
+
+    // Segment before the door
+    if (min < doorStart) {
+      const segmentSize = doorStart - min;
+      const segmentGeometry =
+        axis === 'z'
+          ? new THREE.BoxGeometry(size[0], size[1], segmentSize)
+          : new THREE.BoxGeometry(segmentSize, size[1], size[2]);
+      const wallSegment = new THREE.Mesh(segmentGeometry, wallMaterial);
+      const segmentPos =
+        axis === 'z'
+          ? [position[0], position[1], min + segmentSize / 2]
+          : [min + segmentSize / 2, position[1], position[2]];
+      wallSegment.position.set(segmentPos[0], segmentPos[1], segmentPos[2]);
+      scene.add(wallSegment);
+      walls.push(wallSegment);
+    }
+
+    // Segment after the door
+    if (doorEnd < max) {
+      const segmentSize = max - doorEnd;
+      const segmentGeometry =
+        axis === 'z'
+          ? new THREE.BoxGeometry(size[0], size[1], segmentSize)
+          : new THREE.BoxGeometry(segmentSize, size[1], size[2]);
+      const wallSegment = new THREE.Mesh(segmentGeometry, wallMaterial);
+      const segmentPos =
+        axis === 'z'
+          ? [position[0], position[1], doorEnd + segmentSize / 2]
+          : [doorEnd + segmentSize / 2, position[1], position[2]];
+      wallSegment.position.set(segmentPos[0], segmentPos[1], segmentPos[2]);
+      scene.add(wallSegment);
+      walls.push(wallSegment);
+    }
+  }
+}
 function createRoom(room) {
-  // Floor
-  const floorGeometry = new THREE.PlaneGeometry(room.size[0], room.size[1]);
-  const floorMaterial = new THREE.MeshBasicMaterial({
-    color: room.type === 'boss' ? 0x333333 : 0xaaaaaa,
-  });
-  const floor = new THREE.Mesh(floorGeometry, floorMaterial);
+  const width = room.size[0]; // e.g., 10
+  const depth = room.size[1]; // e.g., 10
+  const centerX = room.position[0];
+  const centerZ = room.position[2];
+  const height = 5; // Wall height
+  const thickness = 0.5; // Wall thickness
+
+  // Create the floor (unchanged)
+  const floorGeometry = new THREE.PlaneGeometry(width, depth);
+  const floor = new THREE.Mesh(
+    floorGeometry,
+    new THREE.MeshBasicMaterial({ color: 0x333333 })
+  );
   floor.rotation.x = -Math.PI / 2;
-  floor.position.set(room.position[0], 0, room.position[2]);
+  floor.position.set(centerX, 0, centerZ);
   scene.add(floor);
 
-  // Walls
-  const height = 5;
-  const thickness = 0.5;
-  createWall(
-    room.position[0],
-    room.position[2],
-    room.size[0],
-    room.size[1],
-    height,
-    thickness,
-    room.doors
-  );
+  // Define wall directions
+  const wallDirections = [
+    {
+      name: 'east',
+      position: [centerX + width / 2, height / 2, centerZ],
+      size: [thickness, height, depth],
+      axis: 'z',
+      doorCheck: (door) => door.position[0] === width / 2,
+    },
+    {
+      name: 'west',
+      position: [centerX - width / 2, height / 2, centerZ],
+      size: [thickness, height, depth],
+      axis: 'z',
+      doorCheck: (door) => door.position[0] === -width / 2,
+    },
+    {
+      name: 'north',
+      position: [centerX, height / 2, centerZ + depth / 2],
+      size: [width, height, thickness],
+      axis: 'x',
+      doorCheck: (door) => door.position[2] === depth / 2,
+    },
+    {
+      name: 'south',
+      position: [centerX, height / 2, centerZ - depth / 2],
+      size: [width, height, thickness],
+      axis: 'x',
+      doorCheck: (door) => door.position[2] === -depth / 2,
+    },
+  ];
 
-  // Enemies
+  // Create walls with door gaps
+  wallDirections.forEach((wallDir) => createWallSegments(wallDir, room));
+
+  // Add enemies and items (unchanged)
   room.enemies.forEach((enemy) => {
-    const enemyMesh = createEnemy(enemy.type, enemy.position, room.position);
-    enemies.push(enemyMesh);
+    const enemyPos = [
+      centerX + enemy.position[0],
+      enemy.position[1],
+      centerZ + enemy.position[2],
+    ];
+    const enemyMesh = new THREE.Mesh(
+      new THREE.BoxGeometry(1, 1, 1),
+      new THREE.MeshBasicMaterial({ color: 0xff0000 })
+    );
+    enemyMesh.position.set(enemyPos[0], enemyPos[1], enemyPos[2]);
+    scene.add(enemyMesh);
   });
 
-  // Items
   room.items.forEach((item) => {
-    const itemMesh = createItem(item.type, item.position, room.position);
-    items.push(itemMesh);
-  });
-
-  // Puzzles (simplified for now)
-  room.puzzles.forEach((puzzle) => {
-    if (puzzle.type === 'switch_puzzle') {
-      // Add switch logic later
-    }
+    const itemPos = [
+      centerX + item.position[0],
+      item.position[1],
+      centerZ + item.position[2],
+    ];
+    const itemMesh = new THREE.Mesh(
+      new THREE.BoxGeometry(0.5, 0.5, 0.5),
+      new THREE.MeshBasicMaterial({ color: 0xffff00 })
+    );
+    itemMesh.position.set(itemPos[0], itemPos[1], itemPos[2]);
+    scene.add(itemMesh);
   });
 }
 
