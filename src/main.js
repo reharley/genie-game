@@ -50,6 +50,7 @@ const walls = [];
 const enemies = [];
 const items = [];
 const projectiles = [];
+const doors = []; // Array to store door objects
 let dungeon = [];
 let boss = null;
 
@@ -234,6 +235,38 @@ function createRoom(room) {
   // Create walls with door gaps
   wallDirections.forEach((wallDir) => createWallSegments(wallDir, room));
 
+  // Create door meshes for locked doors only
+  room.doors.forEach((doorData) => {
+    if (doorData.locked) {
+      const doorGeometry = new THREE.BoxGeometry(doorWidth, 5, 0.5); // Increased depth to 0.5 for visibility
+      const doorMaterial = new THREE.MeshBasicMaterial({ color: 0x885522 });
+      const door = new THREE.Mesh(doorGeometry, doorMaterial);
+      door.position.set(
+        room.position[0] + doorData.position[0],
+        2.5,
+        room.position[2] + doorData.position[2]
+      );
+      if (doorData.position[2] !== 0) {
+        door.rotation.y = 0; // North/South walls
+      } else {
+        door.rotation.y = Math.PI / 2; // East/West walls
+      }
+      door.locked = true;
+      door.to = doorData.to;
+      scene.add(door);
+      doors.push(door);
+
+      // Add a top plane for visibility from the top-down view
+      const doorTop = new THREE.Mesh(
+        new THREE.PlaneGeometry(doorWidth, 0.5),
+        new THREE.MeshBasicMaterial({ color: 0xff0000 }) // Red for visibility
+      );
+      doorTop.position.set(0, 2.5, 0); // Positioned at the top of the door
+      doorTop.rotation.x = -Math.PI / 2; // Horizontal plane
+      door.add(doorTop); // Attach as a child of the door
+    }
+  });
+
   // Add enemies
   room.enemies.forEach((enemyData) => {
     const enemy = createEnemy(
@@ -268,7 +301,7 @@ function createEnemy(type, position, roomPosition) {
   );
   enemy.health = type === 'boss' ? 100 : 20;
   enemy.type = type;
-  enemy.lastAttackTime = 0; // Initialize last attack time for regular enemies
+  enemy.lastAttackTime = 0;
   scene.add(enemy);
   if (type === 'boss') boss = enemy;
   return enemy;
@@ -353,6 +386,12 @@ function checkCollisions(newPosition) {
     const wallBox = new THREE.Box3().setFromObject(wall);
     if (wallBox.intersectsSphere(playerSphere)) return false;
   }
+  for (const door of doors) {
+    if (door.locked) {
+      const doorBox = new THREE.Box3().setFromObject(door);
+      if (doorBox.intersectsSphere(playerSphere)) return false;
+    }
+  }
   return true;
 }
 
@@ -396,6 +435,7 @@ window.addEventListener('resize', resizeRenderer);
 
 // Animation loop
 let lastTime = Date.now();
+let interacting = false; // Flag to handle interaction
 
 function animate() {
   requestAnimationFrame(animate);
@@ -475,6 +515,29 @@ function animate() {
       scene.remove(item);
       items.splice(i, 1);
     }
+  }
+
+  // Door interaction
+  if (pressedKeys['e'] && !interacting) {
+    interacting = true;
+    doors.forEach((door) => {
+      if (player.mesh.position.distanceTo(door.position) < 3.5 && door.locked) {
+        console.log('Interacting with doors');
+        if (player.inventory.includes('key')) {
+          door.locked = false;
+          scene.remove(door);
+          const index = doors.indexOf(door);
+          if (index > -1) doors.splice(index, 1);
+          // Remove key from inventory
+          const keyIndex = player.inventory.indexOf('key');
+          if (keyIndex > -1) player.inventory.splice(keyIndex, 1);
+        } else {
+          console.log('Door is locked. Need a key.');
+        }
+      }
+    });
+  } else if (!pressedKeys['e']) {
+    interacting = false;
   }
 
   // Enemy AI (simple chase for non-boss enemies)
