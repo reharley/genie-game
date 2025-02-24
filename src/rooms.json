@@ -1,0 +1,38 @@
+{
+  "rooms": [
+    {
+      "id": 0,
+      "type": "start",
+      "size": [10, 10],
+      "enemies": [
+        { "type": "spider", "position": [2, 0.5, 2] },
+        { "type": "spider", "position": [-2, 0.5, -2] }
+      ],
+      "items": [],
+      "puzzles": [],
+      "doors": [{ "to": 1, "position": [5, 0, 0], "locked": false }]
+    },
+    {
+      "id": 1,
+      "type": "puzzle",
+      "size": [10, 10],
+      "enemies": [],
+      "items": [{ "type": "key", "position": [0, 0.5, 0] }],
+      "puzzles": [
+        { "type": "switch_puzzle", "solution": ["switch1", "switch2"] }
+      ],
+      "doors": [
+        { "to": 0, "position": [-5, 0, 0], "locked": false },
+        { "to": 2, "position": [0, 0, 5], "locked": true }
+      ]
+    }
+  ],
+  "corridors": [
+    {
+      "id": 0,
+      "length": 5,
+      "direction": "x",
+      "traps": ["spike_trap"]
+    }
+  ]
+}
