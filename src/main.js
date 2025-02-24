@@ -128,29 +128,25 @@ function createWallSegments(wallDirection, room) {
   const { name, position, size, axis, doorCheck } = wallDirection;
   const doorsOnWall = room.doors.filter(doorCheck);
 
-  // Calculate the wall’s extent along its axis (x or z)
   const min =
     axis === 'z' ? position[2] - size[2] / 2 : position[0] - size[0] / 2;
   const max =
     axis === 'z' ? position[2] + size[2] / 2 : position[0] + size[0] / 2;
 
   if (doorsOnWall.length === 0) {
-    // No doors: create a solid wall
     const wall = new THREE.Mesh(
       new THREE.BoxGeometry(size[0], size[1], size[2]),
       wallMaterial
     );
     wall.position.set(position[0], position[1], position[2]);
     scene.add(wall);
-    walls.push(wall); // Assuming 'walls' is a global array for collision detection
+    walls.push(wall);
   } else {
-    // One door: create two wall segments around it
-    const door = doorsOnWall[0]; // Assuming one door per wall for simplicity
+    const door = doorsOnWall[0];
     const doorPos = axis === 'z' ? door.position[2] : door.position[0];
     const doorStart = doorPos - doorWidth / 2;
     const doorEnd = doorPos + doorWidth / 2;
 
-    // Segment before the door
     if (min < doorStart) {
       const segmentSize = doorStart - min;
       const segmentGeometry =
@@ -167,7 +163,6 @@ function createWallSegments(wallDirection, room) {
       walls.push(wallSegment);
     }
 
-    // Segment after the door
     if (doorEnd < max) {
       const segmentSize = max - doorEnd;
       const segmentGeometry =
@@ -185,15 +180,16 @@ function createWallSegments(wallDirection, room) {
     }
   }
 }
+
 function createRoom(room) {
-  const width = room.size[0]; // e.g., 10
-  const depth = room.size[1]; // e.g., 10
+  const width = room.size[0];
+  const depth = room.size[1];
   const centerX = room.position[0];
   const centerZ = room.position[2];
-  const height = 5; // Wall height
-  const thickness = 0.5; // Wall thickness
+  const height = 5;
+  const thickness = 0.5;
 
-  // Create the floor (unchanged)
+  // Create the floor
   const floorGeometry = new THREE.PlaneGeometry(width, depth);
   const floor = new THREE.Mesh(
     floorGeometry,
@@ -238,33 +234,21 @@ function createRoom(room) {
   // Create walls with door gaps
   wallDirections.forEach((wallDir) => createWallSegments(wallDir, room));
 
-  // Add enemies and items (unchanged)
-  room.enemies.forEach((enemy) => {
-    const enemyPos = [
-      centerX + enemy.position[0],
-      enemy.position[1],
-      centerZ + enemy.position[2],
-    ];
-    const enemyMesh = new THREE.Mesh(
-      new THREE.BoxGeometry(1, 1, 1),
-      new THREE.MeshBasicMaterial({ color: 0xff0000 })
+  // Add enemies
+  room.enemies.forEach((enemyData) => {
+    const enemy = createEnemy(
+      enemyData.type,
+      enemyData.position,
+      room.position
     );
-    enemyMesh.position.set(enemyPos[0], enemyPos[1], enemyPos[2]);
-    scene.add(enemyMesh);
+    enemy.room = room;
+    enemies.push(enemy);
   });
 
-  room.items.forEach((item) => {
-    const itemPos = [
-      centerX + item.position[0],
-      item.position[1],
-      centerZ + item.position[2],
-    ];
-    const itemMesh = new THREE.Mesh(
-      new THREE.BoxGeometry(0.5, 0.5, 0.5),
-      new THREE.MeshBasicMaterial({ color: 0xffff00 })
-    );
-    itemMesh.position.set(itemPos[0], itemPos[1], itemPos[2]);
-    scene.add(itemMesh);
+  // Add items
+  room.items.forEach((itemData) => {
+    const item = createItem(itemData.type, itemData.position, room.position);
+    items.push(item);
   });
 }
 
@@ -284,6 +268,7 @@ function createEnemy(type, position, roomPosition) {
   );
   enemy.health = type === 'boss' ? 100 : 20;
   enemy.type = type;
+  enemy.lastAttackTime = 0; // Initialize last attack time for regular enemies
   scene.add(enemy);
   if (type === 'boss') boss = enemy;
   return enemy;
@@ -493,18 +478,37 @@ function animate() {
   }
 
   // Enemy AI (simple chase for non-boss enemies)
+  const attackCooldown = 1000; // milliseconds
+  const attackRange = 1.5;
+  const attackDamage = 5;
+
   enemies.forEach((enemy) => {
-    if (enemy.type !== 'boss' && enemy.health > 0) {
+    if (
+      enemy.room === player.currentRoom &&
+      enemy.health > 0 &&
+      enemy.type !== 'boss'
+    ) {
+      // Movement
       const direction = player.mesh.position
         .clone()
         .sub(enemy.position)
         .normalize();
       enemy.position.add(direction.multiplyScalar(2 * deltaTime));
+
+      // Attack
+      const distance = player.mesh.position.distanceTo(enemy.position);
+      if (
+        distance < attackRange &&
+        currentTime - enemy.lastAttackTime > attackCooldown
+      ) {
+        player.health -= attackDamage;
+        enemy.lastAttackTime = currentTime;
+      }
     }
   });
 
   // Boss AI
-  if (boss && boss.health > 0) {
+  if (boss && boss.health > 0 && boss.room === player.currentRoom) {
     if (boss.health > 70) {
       // Phase 1: Invulnerable (simplified, no switches yet)
     } else if (boss.health > 30) {
