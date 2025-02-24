@@ -268,32 +268,6 @@ function createRoom(room) {
   });
 }
 
-function createWall(centerX, centerZ, width, depth, height, thickness, doors) {
-  const wallMaterial = new THREE.MeshBasicMaterial({ color: 0x555555 });
-  const positions = [
-    [centerX, height / 2, centerZ + depth / 2, width, height, thickness], // North
-    [centerX, height / 2, centerZ - depth / 2, width, height, thickness], // South
-    [centerX - width / 2, height / 2, centerZ, thickness, height, depth], // West
-    [centerX + width / 2, height / 2, centerZ, thickness, height, depth], // East
-  ];
-
-  positions.forEach((pos) => {
-    const wall = new THREE.Mesh(
-      new THREE.BoxGeometry(pos[3], pos[4], pos[5]),
-      wallMaterial
-    );
-    wall.position.set(pos[0], pos[1], pos[2]);
-    wall.geometry.computeBoundingBox();
-    walls.push(wall);
-    scene.add(wall);
-  });
-
-  // Add doors (simplified as gaps for now)
-  doors.forEach((door) => {
-    // Logic to carve out door spaces can be added here
-  });
-}
-
 function createEnemy(type, position, roomPosition) {
   const geometry =
     type === 'boss'
