@@ -102,7 +102,7 @@ const dungeonTemplates = {
       id: 3,
       type: 'boss',
       size: [15, 15],
-      enemies: [{ type: 'boss', position: [0, 0.5, 0] }],
+      enemies: [{ type: 'boss', positioan: [0, 0.5, 0] }],
       items: [],
       puzzles: [],
       doors: [{ to: 2, position: [-7.5, 0, 0], locked: false }],
@@ -128,11 +128,17 @@ function generateDungeon(templates) {
 function createWallSegments(wallDirection, room) {
   const { name, position, size, axis, doorCheck } = wallDirection;
   const doorsOnWall = room.doors.filter(doorCheck);
+  console.log(
+    `Room ${room.id} Creating wall ${name} with ${doorsOnWall.length} doors`
+  );
+  if (room.id === 1) console.log(doorsOnWall);
 
   const min =
     axis === 'z' ? position[2] - size[2] / 2 : position[0] - size[0] / 2;
   const max =
     axis === 'z' ? position[2] + size[2] / 2 : position[0] + size[0] / 2;
+
+  const gapWidth = doorWidth + 2 * player.radius;
 
   if (doorsOnWall.length === 0) {
     const wall = new THREE.Mesh(
@@ -143,29 +149,46 @@ function createWallSegments(wallDirection, room) {
     scene.add(wall);
     walls.push(wall);
   } else {
-    const door = doorsOnWall[0];
-    const doorPos = axis === 'z' ? door.position[2] : door.position[0];
-    const doorStart = doorPos - doorWidth / 2;
-    const doorEnd = doorPos + doorWidth / 2;
+    const gaps = doorsOnWall.map((door) => {
+      // Use world coordinates for door position
+      const doorPos =
+        axis === 'z'
+          ? room.position[2] + door.position[2]
+          : room.position[0] + door.position[0];
+      const gapStart = doorPos - gapWidth / 2;
+      const gapEnd = doorPos + gapWidth / 2;
+      return [gapStart, gapEnd];
+    });
 
-    if (min < doorStart) {
-      const segmentSize = doorStart - min;
-      const segmentGeometry =
-        axis === 'z'
-          ? new THREE.BoxGeometry(size[0], size[1], segmentSize)
-          : new THREE.BoxGeometry(segmentSize, size[1], size[2]);
-      const wallSegment = new THREE.Mesh(segmentGeometry, wallMaterial);
-      const segmentPos =
-        axis === 'z'
-          ? [position[0], position[1], min + segmentSize / 2]
-          : [min + segmentSize / 2, position[1], position[2]];
-      wallSegment.position.set(segmentPos[0], segmentPos[1], segmentPos[2]);
-      scene.add(wallSegment);
-      walls.push(wallSegment);
+    gaps.forEach(([gapStart, gapEnd], index) => {
+      console.log(
+        `Room ${room.id} Wall ${name} Gap ${index}: from ${gapStart} to ${gapEnd}`
+      );
+    });
+    gaps.sort((a, b) => a[0] - b[0]);
+
+    let currentPos = min;
+    for (const [gapStart, gapEnd] of gaps) {
+      if (currentPos < gapStart) {
+        const segmentSize = gapStart - currentPos;
+        const segmentGeometry =
+          axis === 'z'
+            ? new THREE.BoxGeometry(size[0], size[1], segmentSize)
+            : new THREE.BoxGeometry(segmentSize, size[1], size[2]);
+        const wallSegment = new THREE.Mesh(segmentGeometry, wallMaterial);
+        const segmentPos =
+          axis === 'z'
+            ? [position[0], position[1], currentPos + segmentSize / 2]
+            : [currentPos + segmentSize / 2, position[1], position[2]];
+        wallSegment.position.set(segmentPos[0], segmentPos[1], segmentPos[2]);
+        scene.add(wallSegment);
+        walls.push(wallSegment);
+      }
+      currentPos = gapEnd;
     }
 
-    if (doorEnd < max) {
-      const segmentSize = max - doorEnd;
+    if (currentPos < max) {
+      const segmentSize = max - currentPos;
       const segmentGeometry =
         axis === 'z'
           ? new THREE.BoxGeometry(size[0], size[1], segmentSize)
@@ -173,8 +196,8 @@ function createWallSegments(wallDirection, room) {
       const wallSegment = new THREE.Mesh(segmentGeometry, wallMaterial);
       const segmentPos =
         axis === 'z'
-          ? [position[0], position[1], doorEnd + segmentSize / 2]
-          : [doorEnd + segmentSize / 2, position[1], position[2]];
+          ? [position[0], position[1], currentPos + segmentSize / 2]
+          : [currentPos + segmentSize / 2, position[1], position[2]];
       wallSegment.position.set(segmentPos[0], segmentPos[1], segmentPos[2]);
       scene.add(wallSegment);
       walls.push(wallSegment);
