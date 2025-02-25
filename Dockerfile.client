@@ -1,0 +1,31 @@
+# Stage 1: Build the application
+FROM node:20-alpine AS build
+
+WORKDIR /usr/src/app
+
+RUN mkdir ./client
+
+COPY ./client ./client
+
+WORKDIR /usr/src/app/client
+RUN npm install
+
+COPY ./client/.env.production .env
+
+RUN npm run build
+
+# Stage 2: Run the application
+FROM node:20-alpine
+
+WORKDIR /usr/src/app
+
+COPY --from=build /usr/src/app/client /usr/src/app/client
+
+WORKDIR /usr/src/app/client
+
+# Exclude unnecessary files from the final image
+RUN rm -rf .env.*
+
+EXPOSE 8080
+
+CMD ["npm", "start"]
