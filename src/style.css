@@ -3,3 +3,25 @@ html, body {
   padding: 0;
   /* overflow: hidden; */
 }
+
+#player-ui {
+  position: absolute;
+  top: 10px;
+  left: 10px;
+  color: white;
+  font-family: Arial, sans-serif;
+  background-color: rgba(0, 0, 0, 0.5);
+  padding: 10px;
+  border-radius: 5px;
+}
+.enemy-health-bar {
+  position: absolute;
+  width: 50px;
+  height: 5px;
+  background-color: red;
+  border: 1px solid black;
+}
+.enemy-health-bar .health {
+  height: 100%;
+  background-color: green;
+}

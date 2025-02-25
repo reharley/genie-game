@@ -57,6 +57,38 @@ function generateUniqueId() {
   return idCounter++;
 }
 
+function updatePlayerUI() {
+  document.getElementById('health').innerText = `Health: ${player.health}`;
+  document.getElementById(
+    'inventory'
+  ).innerText = `Inventory: ${player.inventory.join(', ')}`;
+}
+
+function createEnemyHealthBar(enemy) {
+  const healthBar = document.createElement('div');
+  healthBar.className = 'enemy-health-bar';
+  healthBar.innerHTML = `<div class="health" style="width: ${enemy.health}%"></div>`;
+  document.body.appendChild(healthBar);
+  enemy.healthBar = healthBar; // Attach health bar to enemy object
+}
+function updateEnemyHealthBars() {
+  enemies.forEach((enemy) => {
+    if (enemy.healthBar) {
+      // Update health
+      const healthElement = enemy.healthBar.querySelector('.health');
+      healthElement.style.width = `${(enemy.health / enemy.maxHealth) * 100}%`;
+      console.log(healthElement.style.width);
+
+      // Update position (convert 3D to 2D screen coordinates)
+      const vector = enemy.mesh.position.clone();
+      vector.project(camera);
+      const x = (vector.x * 0.5 + 0.5) * window.innerWidth;
+      const y = (-vector.y * 0.5 + 0.5) * window.innerHeight;
+      enemy.healthBar.style.left = `${x - 25}px`; // Center the 50px-wide bar
+      enemy.healthBar.style.top = `${y - 30}px`; // Position above enemy
+    }
+  });
+}
 // Dungeon JSON
 const dungeonTemplates = {
   rooms: [
@@ -624,11 +656,13 @@ function createEnemy(type, position, roomPosition) {
     id: generateUniqueId(),
     mesh,
     health: type === 'boss' ? 100 : 20,
+    maxHealth: type === 'boss' ? 100 : 20,
     type,
     lastAttackTime: 0,
     room: null, // Will be set later
   };
   scene.add(mesh);
+  createEnemyHealthBar(enemy);
   if (type === 'boss') boss = enemy;
   return enemy;
 }
@@ -807,6 +841,10 @@ function animate() {
         enemies[j].health -= 10;
         if (enemies[j].health <= 0) {
           scene.remove(enemies[j].mesh);
+          if (enemies[j].healthBar) {
+            document.body.removeChild(enemies[j].healthBar);
+            enemies[j].healthBar = null;
+          }
           enemies.splice(j, 1);
         }
         scene.remove(projectile.mesh);
@@ -825,7 +863,7 @@ function animate() {
       player.inventory.push(items[i].type);
       if (items[i].type === 'potion')
         player.health = Math.min(player.health + 20, 100);
-      scene.remove(items[i]);
+      scene.remove(items[i].mesh);
       items.splice(i, 1);
     }
   }
@@ -900,6 +938,9 @@ function animate() {
 
   camera.position.set(player.mesh.position.x, 10, player.mesh.position.z);
   camera.lookAt(player.mesh.position.x, 0, player.mesh.position.z);
+
+  updatePlayerUI();
+  updateEnemyHealthBars();
 
   if (player.health <= 0) console.log('Game Over');
   if (boss && boss.health <= 0) console.log('You Win!');
