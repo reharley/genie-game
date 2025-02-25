@@ -145,7 +145,7 @@ function executeScript(script) {
     },
   };
   try {
-    const newScript = script; //`const { player, enemies, items, projectiles, doors, dungeon, boss, scene, createItem, spawnItemAt } = context;\n${script}`;
+    const newScript = script;
     console.log('Executing AI script:');
     console.log(newScript);
     const func = new Function('context', newScript);
