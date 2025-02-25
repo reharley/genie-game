@@ -63,7 +63,19 @@ function updatePlayerUI() {
     'inventory'
   ).innerText = `Inventory: ${player.inventory.join(', ')}`;
 }
-
+function addMessageToChatLog(sender, message) {
+  const chatMessages = document.getElementById('chat-messages');
+  const chatLogContainer = document.getElementById('chat-log');
+  const messageElement = document.createElement('div');
+  messageElement.className = `message ${sender}-message`;
+  if (sender === 'Agent') {
+    messageElement.innerHTML = `<div><strong>${sender}:</strong>   ${message.type}</div>  ${message.response}`;
+  } else {
+    messageElement.innerText = `${sender}: ${message}`;
+  }
+  chatMessages.appendChild(messageElement);
+  chatLogContainer.scrollTop = chatLogContainer.scrollHeight;
+}
 function createEnemyHealthBar(enemy) {
   const healthBar = document.createElement('div');
   healthBar.className = 'enemy-health-bar';
@@ -77,7 +89,6 @@ function updateEnemyHealthBars() {
       // Update health
       const healthElement = enemy.healthBar.querySelector('.health');
       healthElement.style.width = `${(enemy.health / enemy.maxHealth) * 100}%`;
-      console.log(healthElement.style.width);
 
       // Update position (convert 3D to 2D screen coordinates)
       const vector = enemy.mesh.position.clone();
@@ -190,6 +201,7 @@ function executeScript(script) {
 recognition.onresult = (event) => {
   const transcript = event.results[0][0].transcript;
   console.log('Voice command:', transcript);
+  addMessageToChatLog('Player', transcript);
   sendToAI(transcript);
 };
 
@@ -214,6 +226,7 @@ ${JSON.stringify(gameState, null, 2)}
 The player said: "${transcript}".
 Provide a command to manipulate the game state or answer the question.`;
   const response = await callAIAPI(prompt);
+  addMessageToChatLog('Agent', response);
   console.log('AI response:', response);
   if (response && response.type === 'js_game_script') {
     executeScript(response.response);
