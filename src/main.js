@@ -102,7 +102,7 @@ const dungeonTemplates = {
       id: 3,
       type: 'boss',
       size: [15, 15],
-      enemies: [{ type: 'boss', positioan: [0, 0.5, 0] }],
+      enemies: [{ type: 'boss', position: [0, 0.5, 0] }],
       items: [],
       puzzles: [],
       doors: [{ to: 2, position: [-7.5, 0, 0], locked: false }],
