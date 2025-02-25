@@ -110,18 +110,72 @@ const dungeonTemplates = {
   ],
 };
 
-// Generate dungeon
 function generateDungeon(templates) {
-  const dungeonLayout = [
-    { ...templates.rooms[0], position: [0, 0, 0] },
-    { ...templates.rooms[1], position: [15, 0, 0] },
-    { ...templates.rooms[2], position: [30, 0, 0] },
-    { ...templates.rooms[3], position: [45, 0, 0] },
-  ];
+  // Map rooms by ID for easy lookup
+  const roomMap = {};
+  templates.rooms.forEach((room) => {
+    roomMap[room.id] = room;
+  });
+
+  // Initialize positions and BFS queue
+  const positions = {};
+  const queue = [];
+  positions[0] = [0, 0, 0]; // Start room at origin
+  queue.push(0);
+
+  // BFS to place rooms based on door connections
+  while (queue.length > 0) {
+    const roomId = queue.shift();
+    const room = roomMap[roomId];
+    const pos = positions[roomId];
+
+    for (const door of room.doors) {
+      const connectedId = door.to;
+      if (!(connectedId in positions)) {
+        // Only place unpositioned rooms
+        const connectedRoom = roomMap[connectedId];
+        const sizeA = room.size;
+        const sizeB = connectedRoom.size;
+        let offset;
+
+        // Determine door direction and calculate offset
+        if (door.position[0] === sizeA[0] / 2) {
+          // East
+          offset = [sizeA[0] / 2 + sizeB[0] / 2, 0, 0];
+        } else if (door.position[0] === -sizeA[0] / 2) {
+          // West
+          offset = [-(sizeA[0] / 2 + sizeB[0] / 2), 0, 0];
+        } else if (door.position[2] === sizeA[1] / 2) {
+          // North
+          offset = [0, 0, sizeA[1] / 2 + sizeB[1] / 2];
+        } else if (door.position[2] === -sizeA[1] / 2) {
+          // South
+          offset = [0, 0, -(sizeA[1] / 2 + sizeB[1] / 2)];
+        }
+
+        // Set position of connected room
+        positions[connectedId] = [
+          pos[0] + offset[0],
+          pos[1] + offset[1],
+          pos[2] + offset[2],
+        ];
+        queue.push(connectedId);
+      }
+    }
+  }
+
+  // Create dungeon layout with calculated positions
+  const dungeonLayout = templates.rooms.map((room) => ({
+    ...room,
+    position: positions[room.id],
+  }));
+
+  // Build rooms in the scene
   dungeonLayout.forEach((room, index) => {
     room.index = index;
     createRoom(room);
   });
+
   return dungeonLayout;
 }
 
