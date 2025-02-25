@@ -51,6 +51,7 @@ const projectiles = [];
 const doors = [];
 let dungeon = [];
 let boss = null;
+let gameOver = false;
 
 let idCounter = 0;
 function generateUniqueId() {
@@ -97,6 +98,14 @@ function updateEnemyHealthBars() {
       const y = (-vector.y * 0.5 + 0.5) * window.innerHeight;
       enemy.healthBar.style.left = `${x - 25}px`; // Center the 50px-wide bar
       enemy.healthBar.style.top = `${y - 30}px`; // Position above enemy
+    }
+  });
+}
+function removeEnemyHealthBars() {
+  enemies.forEach((enemy) => {
+    if (enemy.healthBar) {
+      document.body.removeChild(enemy.healthBar);
+      enemy.healthBar = null;
     }
   });
 }
@@ -366,6 +375,95 @@ const { player, enemies, items, projectiles, doors, dungeon, boss, scene, create
     }
   }
 }
+
+function resetGame() {
+  // Reset player
+  player.health = 100;
+  player.position.set(0, 0.1, 0);
+  player.mesh.position.copy(player.position);
+  player.inventory = ['sword', 'genie lamp'];
+
+  // Remove all enemies
+  enemies.forEach((enemy) => {
+    scene.remove(enemy.mesh);
+  });
+  removeEnemyHealthBars();
+
+  enemies.length = 0;
+  boss = null;
+
+  // Remove all items
+  items.forEach((item) => scene.remove(item.mesh));
+  items.length = 0;
+
+  // Remove all projectiles
+  projectiles.forEach((projectile) => scene.remove(projectile.mesh));
+  projectiles.length = 0;
+
+  // Remove all doors
+  doors.forEach((door) => scene.remove(door.mesh));
+  doors.length = 0;
+
+  // Recreate enemies, items, and locked doors based on dungeon templates
+  dungeon.forEach((room) => {
+    // Recreate enemies
+    room.enemies.forEach((enemyData) => {
+      const enemy = createEnemy(
+        enemyData.type,
+        enemyData.position,
+        room.position
+      );
+      enemy.room = room;
+      enemies.push(enemy);
+    });
+
+    // Recreate items
+    room.items.forEach((itemData) => {
+      const item = createItem(itemData.type, itemData.position, room.position);
+      items.push(item);
+    });
+
+    // Recreate locked doors
+    room.doors.forEach((doorData) => {
+      if (doorData.locked) {
+        const mesh = new THREE.Mesh(
+          new THREE.BoxGeometry(doorWidth, 5, 0.5),
+          new THREE.MeshBasicMaterial({ color: 0x885522 })
+        );
+        mesh.position.set(
+          room.position[0] + doorData.position[0],
+          2.5,
+          room.position[2] + doorData.position[2]
+        );
+        mesh.rotation.y = doorData.position[2] !== 0 ? 0 : Math.PI / 2;
+        const door = {
+          id: generateUniqueId(),
+          mesh,
+          locked: true,
+          to: doorData.to,
+        };
+        scene.add(mesh);
+        doors.push(door);
+
+        const doorTop = new THREE.Mesh(
+          new THREE.PlaneGeometry(doorWidth, 0.5),
+          new THREE.MeshBasicMaterial({ color: 0xff0000 })
+        );
+        doorTop.position.set(0, 2.5, 0);
+        doorTop.rotation.x = -Math.PI / 2;
+        mesh.add(doorTop);
+      }
+    });
+  });
+
+  // Reset AI companion
+  aiCompanion.interventionPoints = 3;
+  aiCompanion.lastInterventionTime = Date.now();
+
+  gameOver = false;
+  animate();
+}
+
 function generateDungeon(templates) {
   const roomMap = {};
   templates.rooms.forEach((room) => {
@@ -805,8 +903,21 @@ window.addEventListener('resize', resizeRenderer);
 
 let lastTime = Date.now();
 let interacting = false;
-
+function showGameOverUI(message) {
+  const gameOverUI = document.getElementById('game-over');
+  document.getElementById('restart-button').addEventListener('click', () => {
+    resetGame();
+    gameOverUI.style.display = 'none';
+    gameOver = false;
+  });
+  document.getElementById('game-over-message').innerText = message;
+  gameOverUI.style.display = 'flex';
+}
 function animate() {
+  if (gameOver) {
+    renderer.render(scene, camera);
+    return;
+  }
   requestAnimationFrame(animate);
   const currentTime = Date.now();
   const deltaTime = (currentTime - lastTime) / 1000;
@@ -955,8 +1066,14 @@ function animate() {
   updatePlayerUI();
   updateEnemyHealthBars();
 
-  if (player.health <= 0) console.log('Game Over');
-  if (boss && boss.health <= 0) console.log('You Win!');
+  if (player.health <= 0) {
+    gameOver = true;
+    showGameOverUI('Game Over!');
+  }
+  if (boss && boss.health <= 0) {
+    gameOver = true;
+    showGameOverUI('You Win!');
+  }
 
   renderer.render(scene, camera);
 }
