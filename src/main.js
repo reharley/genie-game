@@ -1,4 +1,5 @@
 import * as THREE from 'three';
+import { loadMeshGLTFModel } from './loader';
 import './style.css';
 
 const doorWidth = 2;
@@ -26,15 +27,22 @@ const player = {
     1,
     0x00ff00
   ),
+  animations: [], // Present once the model is loaded
+  mixer: null, // Present once the model is loaded
   health: 100,
   inventory: ['sword', 'genie lamp'],
+  lastCastTime: null,
   radius: 0.5,
   position: new THREE.Vector3(0, 0.1, 0),
   moveDirection: new THREE.Vector3(),
   facingDirection: new THREE.Vector3(0, 0, 1),
   currentRoom: null,
 };
-scene.add(player.mesh);
+loadMeshGLTFModel(
+  'https://novelscapestorage.blob.core.windows.net/game-assets/char.glb',
+  scene,
+  player
+);
 player.mesh.position.copy(player.position);
 
 // AI Companion
@@ -833,6 +841,7 @@ window.addEventListener('mousedown', (event) => {
     };
     scene.add(mesh);
     projectiles.push(projectile);
+    player.lastCastTime = Date.now();
   }
 });
 
@@ -945,8 +954,33 @@ function animate() {
       .sub(player.mesh.position)
       .setY(0)
       .normalize();
-    player.mesh.setDirection(direction);
+    player.mesh.lookAt(player.mesh.position.clone().add(direction));
     player.facingDirection = direction.clone();
+  }
+
+  if (player.mixer) {
+    player.mixer.update(deltaTime); // Update animations with time delta
+    if (player.lastCastTime && currentTime - player.lastCastTime < 1250) {
+      if (player.castAction) {
+        if (player.currentAction !== player.castAction) {
+          if (player.currentAction) player.currentAction.stop();
+          player.castAction.play();
+          player.currentAction = player.castAction;
+        }
+      }
+    } else if (moveVector.length() > 0 && player.walkAction) {
+      if (player.currentAction !== player.walkAction) {
+        if (player.currentAction) player.currentAction.stop();
+        player.walkAction.play();
+        player.currentAction = player.walkAction;
+      }
+    } else if (player.idleAction) {
+      if (player.currentAction !== player.idleAction) {
+        if (player.currentAction) player.currentAction.stop();
+        player.idleAction.play();
+        player.currentAction = player.idleAction;
+      }
+    }
   }
 
   player.currentRoom = dungeon.find((room) => {
