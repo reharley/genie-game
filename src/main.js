@@ -140,12 +140,15 @@ recognition.onerror = (event) => {
 
 // **AI Integration**
 async function sendToAI(transcript) {
-  const prompt = `You are an AI assistant named Genie in a roguelike game. The player is in room ${
-    player.currentRoom.id
-  }, health: ${player.health}, inventory: ${player.inventory.join(
+  const prompt = `
+You are an AI assistant named Genie in a roguelike game.
+
+The player is in room ${player.currentRoom.id}, health: ${
+    player.health
+  }, inventory: ${player.inventory.join(
     ', '
   )}. The player said: "${transcript}".
-  Provide a command to manipulate the game state. Or answer a question.`;
+Provide a command to manipulate the game state. Or answer a question.`;
   const response = await callAIAPI(prompt);
   console.log('AI response:', response);
   executeAICommand(response);
@@ -175,20 +178,22 @@ async function callAIAPI(prompt) {
   } else {
     const functions = [
       {
-        name: 'generate_prompts',
+        name: 'game_master',
         description:
-          'Generates positive and negative prompts for image generation based on the provided passage.',
+          'Answers questions and provides commands to manipulate the game state.',
         parameters: {
           type: 'object',
           properties: {
-            positivePrompt: {
+            type: {
+              type: 'string',
+              enum: ['agent_response', 'new_game_state', 'js_game_script'],
+              description:
+                'Possible types of responses that can be generated. Only generate js to manipulate the game state when generating a script.',
+            },
+            response: {
               type: 'string',
               description:
-                'The positive list of attributes describing the background. **DO NOT INCLUDE CHARACTERS**',
-            },
-            negativePrompt: {
-              type: 'string',
-              description: 'The negative prompt for image generation.',
+                'The response that will be used. This will be used based on which type is selected.',
             },
           },
           required: ['positivePrompt', 'negativePrompt'],
@@ -204,12 +209,27 @@ async function callAIAPI(prompt) {
       },
       body: JSON.stringify({
         model: 'gpt-4o-mini',
+        functions,
+        function_call: { name: 'game_master' },
         messages: [{ role: 'user', content: prompt }],
         max_tokens: 50,
       }),
     });
     const data = await response.json();
-    return data.choices[0].message.content.trim();
+    const message = data.choices[0]?.message;
+    try {
+      if (message?.function_call?.name === 'game_master') {
+        const args = JSON.parse(message.function_call.arguments);
+        if (!args.type || !args.response) {
+          throw new Error('Incomplete prompt data received from OpenAI.');
+        }
+        return args;
+      } else {
+        throw new Error('No function call was made by the assistant.');
+      }
+    } catch (error) {
+      console.error('Error with prompts:', error.message);
+    }
   }
 }
 
