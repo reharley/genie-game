@@ -27,7 +27,7 @@ const player = {
     0x00ff00
   ),
   health: 100,
-  inventory: [],
+  inventory: ['sword', 'genie lamp'],
   radius: 0.5,
   position: new THREE.Vector3(0, 0.1, 0),
   moveDirection: new THREE.Vector3(),
@@ -51,6 +51,11 @@ const projectiles = [];
 const doors = [];
 let dungeon = [];
 let boss = null;
+
+let idCounter = 0;
+function generateUniqueId() {
+  return idCounter++;
+}
 
 // Dungeon JSON
 const dungeonTemplates = {
@@ -140,7 +145,9 @@ function executeScript(script) {
     },
   };
   try {
-    const newScript = `const { player, enemies, items, projectiles, doors, dungeon, boss, scene, createItem, spawnItemAt } = context;\n${script}`;
+    const newScript = script; //`const { player, enemies, items, projectiles, doors, dungeon, boss, scene, createItem, spawnItemAt } = context;\n${script}`;
+    console.log('Executing AI script:');
+    console.log(newScript);
     const func = new Function('context', newScript);
     func(context);
   } catch (error) {
@@ -227,6 +234,17 @@ async function callAIAPI(prompt) {
 Only generate js to manipulate the game state when generating a script.
 When generating a script always use ids to reference objects.
 Use direct manipulation when editing the game state.
+All the objects are three js objects in a scene. When altering the scene make sure to add and remove objects from the scene.
+
+Here's a sample script removing an object from the scene:
+\`\`\`javascript
+const key = items.find(item => item.id === 3);
+if (key) {
+    player.inventory.push(key.type);
+    items.splice(items.indexOf(key), 1);
+    scene.remove(key.mesh);
+}
+\`\`\`
 Here is the function executing the script:
 \`\`\`javascript
 function executeScript(script) {
@@ -255,6 +273,10 @@ function executeScript(script) {
   }
 }
 \`\`\`
+The code should always begin with the following line:
+\`\`\`javascript
+const { player, enemies, items, projectiles, doors, dungeon, boss, scene, createItem, spawnItemAt } = context;
+\`\`\`
 `,
             },
             response: {
@@ -263,7 +285,7 @@ function executeScript(script) {
                 'The response that will be used. This will be used based on which type is selected.',
             },
           },
-          required: ['positivePrompt', 'negativePrompt'],
+          required: ['type', 'response'],
         },
       },
     ];
@@ -390,21 +412,26 @@ function createRoom(room) {
     },
   ];
   wallDirections.forEach((wallDir) => createWallSegments(wallDir, room));
+
   room.doors.forEach((doorData) => {
     if (doorData.locked) {
-      const door = new THREE.Mesh(
+      const mesh = new THREE.Mesh(
         new THREE.BoxGeometry(doorWidth, 5, 0.5),
         new THREE.MeshBasicMaterial({ color: 0x885522 })
       );
-      door.position.set(
+      mesh.position.set(
         room.position[0] + doorData.position[0],
         2.5,
         room.position[2] + doorData.position[2]
       );
-      door.rotation.y = doorData.position[2] !== 0 ? 0 : Math.PI / 2;
-      door.locked = true;
-      door.to = doorData.to;
-      scene.add(door);
+      mesh.rotation.y = doorData.position[2] !== 0 ? 0 : Math.PI / 2;
+      const door = {
+        id: generateUniqueId(),
+        mesh,
+        locked: true,
+        to: doorData.to,
+      };
+      scene.add(mesh);
       doors.push(door);
       const doorTop = new THREE.Mesh(
         new THREE.PlaneGeometry(doorWidth, 0.5),
@@ -412,9 +439,10 @@ function createRoom(room) {
       );
       doorTop.position.set(0, 2.5, 0);
       doorTop.rotation.x = -Math.PI / 2;
-      door.add(doorTop);
+      mesh.add(doorTop);
     }
   });
+
   room.enemies.forEach((enemyData) => {
     const enemy = createEnemy(
       enemyData.type,
@@ -493,10 +521,7 @@ function createWallSegments(wallDirection, room) {
 }
 
 function getCurrentGameState() {
-  // Get the player's current room
   const currentRoom = player.currentRoom;
-
-  // Gather room state
   const roomState = {
     id: currentRoom.id,
     type: currentRoom.type,
@@ -504,60 +529,80 @@ function getCurrentGameState() {
     enemies: enemies
       .filter((e) => e.room === currentRoom)
       .map((e) => ({
+        id: e.id,
         type: e.type,
-        position: [e.position.x, e.position.y, e.position.z],
+        position: [e.mesh.position.x, e.mesh.position.y, e.mesh.position.z],
         health: e.health,
       })),
     items: items
       .filter((item) => {
-        // Determine if item is in current room bounds
-        const dx = item.position.x - currentRoom.position[0];
-        const dz = item.position.z - currentRoom.position[2];
+        const dx = item.mesh.position.x - currentRoom.position[0];
+        const dz = item.mesh.position.z - currentRoom.position[2];
         return (
           Math.abs(dx) < currentRoom.size[0] / 2 &&
           Math.abs(dz) < currentRoom.size[1] / 2
         );
       })
       .map((item) => ({
+        id: item.id,
         type: item.type,
-        position: [item.position.x, item.position.y, item.position.z],
+        position: [
+          item.mesh.position.x,
+          item.mesh.position.y,
+          item.mesh.position.z,
+        ],
+      })),
+    projectiles: projectiles
+      .filter((p) => {
+        const dx = p.mesh.position.x - currentRoom.position[0];
+        const dz = p.mesh.position.z - currentRoom.position[2];
+        return (
+          Math.abs(dx) < currentRoom.size[0] / 2 &&
+          Math.abs(dz) < currentRoom.size[1] / 2
+        );
+      })
+      .map((p) => ({
+        id: p.id,
+        position: [p.mesh.position.x, p.mesh.position.y, p.mesh.position.z],
       })),
     doors: currentRoom.doors.map((doorData) => {
-      const door = doors.find((d) => d.to === doorData.to);
+      const doorPosition = new THREE.Vector3(
+        currentRoom.position[0] + doorData.position[0],
+        doorData.position[1],
+        currentRoom.position[2] + doorData.position[2]
+      );
+      const doorObj = doors.find(
+        (d) => d.mesh.position.distanceTo(doorPosition) < 0.1
+      );
       return {
         to: doorData.to,
-        position: [
-          currentRoom.position[0] + doorData.position[0],
-          doorData.position[1],
-          currentRoom.position[2] + doorData.position[2],
-        ],
-        locked: door ? door.locked : false,
+        position: [doorPosition.x, doorPosition.y, doorPosition.z],
+        locked: !!doorObj,
+        meshId: doorObj ? doorObj.id : null,
       };
     }),
   };
-
-  // Gather player state
   const playerState = {
     position: [player.position.x, player.position.y, player.position.z],
     health: player.health,
     inventory: player.inventory,
     currentRoom: currentRoom.id,
   };
-
-  // Initialize game state object
   const gameState = {
     player: playerState,
     currentRoom: roomState,
   };
-
-  // Include boss state if player is in boss room
   if (boss && boss.room === currentRoom) {
     gameState.boss = {
-      position: [boss.position.x, boss.position.y, boss.position.z],
+      id: boss.id,
+      position: [
+        boss.mesh.position.x,
+        boss.mesh.position.y,
+        boss.mesh.position.z,
+      ],
       health: boss.health,
     };
   }
-
   return gameState;
 }
 
@@ -569,16 +614,21 @@ function createEnemy(type, position, roomPosition) {
   const material = new THREE.MeshBasicMaterial({
     color: type === 'boss' ? 0x550000 : 0xff0000,
   });
-  const enemy = new THREE.Mesh(geometry, material);
-  enemy.position.set(
+  const mesh = new THREE.Mesh(geometry, material);
+  mesh.position.set(
     roomPosition[0] + position[0],
     position[1],
     roomPosition[2] + position[2]
   );
-  enemy.health = type === 'boss' ? 100 : 20;
-  enemy.type = type;
-  enemy.lastAttackTime = 0;
-  scene.add(enemy);
+  const enemy = {
+    id: generateUniqueId(),
+    mesh,
+    health: type === 'boss' ? 100 : 20,
+    type,
+    lastAttackTime: 0,
+    room: null, // Will be set later
+  };
+  scene.add(mesh);
   if (type === 'boss') boss = enemy;
   return enemy;
 }
@@ -588,14 +638,18 @@ function createItem(type, position, roomPosition) {
   const material = new THREE.MeshBasicMaterial({
     color: type === 'key' ? 0xffff00 : 0xff5555,
   });
-  const item = new THREE.Mesh(geometry, material);
-  item.position.set(
+  const mesh = new THREE.Mesh(geometry, material);
+  mesh.position.set(
     roomPosition[0] + position[0],
     position[1],
     roomPosition[2] + position[2]
   );
-  item.type = type;
-  scene.add(item);
+  const item = {
+    id: generateUniqueId(),
+    mesh,
+    type,
+  };
+  scene.add(mesh);
   return item;
 }
 
@@ -621,14 +675,18 @@ window.addEventListener('mousemove', (event) => {
 
 window.addEventListener('mousedown', (event) => {
   if (event.button === 0) {
-    const projectile = new THREE.Mesh(
+    const mesh = new THREE.Mesh(
       new THREE.SphereGeometry(0.1, 8, 8),
       new THREE.MeshBasicMaterial({ color: 0xffff00 })
     );
-    projectile.position.copy(player.mesh.position);
-    projectile.velocity = player.facingDirection.clone().multiplyScalar(10);
-    projectile.creationTime = Date.now();
-    scene.add(projectile);
+    mesh.position.copy(player.mesh.position);
+    const projectile = {
+      id: generateUniqueId(),
+      mesh,
+      velocity: player.facingDirection.clone().multiplyScalar(10),
+      creationTime: Date.now(),
+    };
+    scene.add(mesh);
     projectiles.push(projectile);
   }
 });
@@ -660,7 +718,7 @@ function checkCollisions(newPosition) {
   for (const door of doors) {
     if (
       door.locked &&
-      new THREE.Box3().setFromObject(door).intersectsSphere(playerSphere)
+      new THREE.Box3().setFromObject(door.mesh).intersectsSphere(playerSphere)
     )
       return false;
   }
@@ -741,29 +799,29 @@ function animate() {
 
   for (let i = projectiles.length - 1; i >= 0; i--) {
     const projectile = projectiles[i];
-    projectile.position.add(
+    projectile.mesh.position.add(
       projectile.velocity.clone().multiplyScalar(deltaTime)
     );
     for (let j = enemies.length - 1; j >= 0; j--) {
-      if (projectile.position.distanceTo(enemies[j].position) < 0.6) {
+      if (projectile.mesh.position.distanceTo(enemies[j].mesh.position) < 0.6) {
         enemies[j].health -= 10;
         if (enemies[j].health <= 0) {
-          scene.remove(enemies[j]);
+          scene.remove(enemies[j].mesh);
           enemies.splice(j, 1);
         }
-        scene.remove(projectile);
+        scene.remove(projectile.mesh);
         projectiles.splice(i, 1);
         break;
       }
     }
     if (currentTime - projectile.creationTime > 1000) {
-      scene.remove(projectile);
+      scene.remove(projectile.mesh);
       projectiles.splice(i, 1);
     }
   }
 
   for (let i = items.length - 1; i >= 0; i--) {
-    if (player.mesh.position.distanceTo(items[i].position) < 0.7) {
+    if (player.mesh.position.distanceTo(items[i].mesh.position) < 0.7) {
       player.inventory.push(items[i].type);
       if (items[i].type === 'potion')
         player.health = Math.min(player.health + 20, 100);
@@ -775,10 +833,14 @@ function animate() {
   if (pressedKeys['e'] && !interacting) {
     interacting = true;
     doors.forEach((door) => {
-      if (player.mesh.position.distanceTo(door.position) < 3.5 && door.locked) {
+      if (
+        player.mesh.position.distanceTo(door.mesh.position) < 3.5 &&
+        door.locked
+      ) {
+        console.log('inventory:', player.inventory);
         if (player.inventory.includes('key')) {
           door.locked = false;
-          scene.remove(door);
+          scene.remove(door.mesh);
           const index = doors.indexOf(door);
           if (index > -1) doors.splice(index, 1);
           const keyIndex = player.inventory.indexOf('key');
@@ -798,11 +860,11 @@ function animate() {
     ) {
       const direction = player.mesh.position
         .clone()
-        .sub(enemy.position)
+        .sub(enemy.mesh.position)
         .normalize();
-      enemy.position.add(direction.multiplyScalar(2 * deltaTime));
+      enemy.mesh.position.add(direction.multiplyScalar(2 * deltaTime));
       if (
-        player.mesh.position.distanceTo(enemy.position) < 1.5 &&
+        player.mesh.position.distanceTo(enemy.mesh.position) < 1.5 &&
         currentTime - enemy.lastAttackTime > 1000
       ) {
         player.health -= 5;
@@ -815,24 +877,25 @@ function animate() {
     if (boss.health > 70) {
       // Phase 1
     } else if (boss.health > 30) {
-      boss.position.add(
+      boss.mesh.position.add(
         player.mesh.position
           .clone()
-          .sub(boss.position)
+          .sub(boss.mesh.position)
           .normalize()
           .multiplyScalar(3 * deltaTime)
       );
     } else {
-      boss.position.add(
+      boss.mesh.position.add(
         player.mesh.position
           .clone()
-          .sub(boss.position)
+          .sub(boss.mesh.position)
           .normalize()
           .multiplyScalar(5 * deltaTime)
       );
     }
-    if (player.mesh.position.distanceTo(boss.position) < 1.5)
+    if (player.mesh.position.distanceTo(boss.mesh.position) < 1.5) {
       player.health -= 10 * deltaTime;
+    }
   }
 
   camera.position.set(player.mesh.position.x, 10, player.mesh.position.z);
