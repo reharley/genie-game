@@ -1,10 +1,10 @@
 import * as THREE from 'three';
 import './style.css';
 
-const doorWidth = 2; // Doors will be 2 units wide
+const doorWidth = 2;
 const wallMaterial = new THREE.MeshBasicMaterial({ color: 0x555555 });
 
-// Create scene, camera, and renderer
+// Scene setup
 const scene = new THREE.Scene();
 const camera = new THREE.PerspectiveCamera(
   75,
@@ -15,12 +15,10 @@ const camera = new THREE.PerspectiveCamera(
 const renderer = new THREE.WebGLRenderer();
 renderer.setSize(window.innerWidth, window.innerHeight);
 document.body.appendChild(renderer.domElement);
-
-// Position camera above the scene, looking down
 camera.position.set(0, 10, 0);
 camera.lookAt(0, 0, 0);
 
-// Player object with additional stats
+// Player
 const player = {
   mesh: new THREE.ArrowHelper(
     new THREE.Vector3(0, 0, 1),
@@ -45,19 +43,18 @@ const aiCompanion = {
   lastInterventionTime: Date.now(),
 };
 
-// Dungeon data
+// Game objects
 const walls = [];
 const enemies = [];
 const items = [];
 const projectiles = [];
-const doors = []; // Array to store door objects
+const doors = [];
 let dungeon = [];
 let boss = null;
 
-// Load dungeon templates (hardcoded for now, replace with fetch from rooms.json)
+// Dungeon JSON
 const dungeonTemplates = {
   rooms: [
-    // Stage 1: Forest Theme
     {
       id: 0,
       type: 'start',
@@ -82,7 +79,6 @@ const dungeonTemplates = {
         { to: 2, position: [0, 0, 5], locked: true },
       ],
     },
-    // Stage 2: Shadow Theme
     {
       id: 2,
       type: 'combat',
@@ -110,50 +106,216 @@ const dungeonTemplates = {
   ],
 };
 
+// **Voice Recognition Setup**
+const recognition = new (window.SpeechRecognition ||
+  window.webkitSpeechRecognition)();
+recognition.lang = 'en-US';
+recognition.interimResults = false;
+recognition.maxAlternatives = 1;
+let listening = false;
+
+window.addEventListener('keydown', (event) => {
+  if (event.key === 'v' && !listening) {
+    listening = true;
+    recognition.start();
+    console.log('Listening for voice command...');
+  }
+});
+
+recognition.onresult = (event) => {
+  const transcript = event.results[0][0].transcript;
+  console.log('Voice command:', transcript);
+  sendToAI(transcript);
+};
+
+recognition.onend = () => {
+  listening = false;
+  console.log('Stopped listening');
+};
+
+recognition.onerror = (event) => {
+  console.error('Speech recognition error', event.error);
+  listening = false;
+};
+
+// **AI Integration**
+async function sendToAI(transcript) {
+  const prompt = `You are an AI assistant named Genie in a roguelike game. The player is in room ${
+    player.currentRoom.id
+  }, health: ${player.health}, inventory: ${player.inventory.join(
+    ', '
+  )}. The player said: "${transcript}".
+  Provide a command to manipulate the game state. Or answer a question.`;
+  const response = await callAIAPI(prompt);
+  console.log('AI response:', response);
+  executeAICommand(response);
+}
+
+async function callAIAPI(prompt) {
+  const mock = false; // Set to true to use mock API response
+  if (mock) {
+    // Mock API call (replace with actual GPT-4o-mini API endpoint)
+    // In practice, use fetch() with your API key and endpoint
+    return new Promise((resolve) => {
+      setTimeout(() => {
+        // Simulate AI response based on transcript (for demo purposes)
+        if (prompt.includes('need a key') || prompt.includes('spawn a key')) {
+          resolve(`spawn key at player`);
+        } else if (prompt.includes('unlock the door')) {
+          resolve(`unlock door in room ${player.currentRoom.id}`);
+        } else if (prompt.includes('heal me')) {
+          resolve(`heal player by 20`);
+        } else if (prompt.includes('hurt enemies')) {
+          resolve(`damage enemies by 10`);
+        } else {
+          resolve(`spawn potion at player`);
+        }
+      }, 500);
+    });
+  } else {
+    const functions = [
+      {
+        name: 'generate_prompts',
+        description:
+          'Generates positive and negative prompts for image generation based on the provided passage.',
+        parameters: {
+          type: 'object',
+          properties: {
+            positivePrompt: {
+              type: 'string',
+              description:
+                'The positive list of attributes describing the background. **DO NOT INCLUDE CHARACTERS**',
+            },
+            negativePrompt: {
+              type: 'string',
+              description: 'The negative prompt for image generation.',
+            },
+          },
+          required: ['positivePrompt', 'negativePrompt'],
+        },
+      },
+    ];
+    const apiKey = import.meta.env.VITE_OPENAI_API_KEY;
+    const response = await fetch('https://api.openai.com/v1/chat/completions', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        Authorization: `Bearer ${apiKey}`,
+      },
+      body: JSON.stringify({
+        model: 'gpt-4o-mini',
+        messages: [{ role: 'user', content: prompt }],
+        max_tokens: 50,
+      }),
+    });
+    const data = await response.json();
+    return data.choices[0].message.content.trim();
+  }
+}
+
+function executeAICommand(command) {
+  if (command.startsWith('spawn')) {
+    const match = command.match(/spawn (\w+) at (\w+|\d+,\d+,\d+)/);
+    if (match) {
+      const itemType = match[1];
+      let position;
+      if (match[2] === 'player') {
+        position = [player.mesh.position.x, 0.5, player.mesh.position.z];
+      } else {
+        const coords = match[2].split(',').map(Number);
+        position = [coords[0], 0.5, coords[2]];
+      }
+      spawnItem(itemType, position);
+      console.log(`Spawned ${itemType} at [${position}]`);
+    }
+  } else if (command.startsWith('unlock door in room')) {
+    const match = command.match(/unlock door in room (\d+)/);
+    if (match) {
+      const roomId = parseInt(match[1]);
+      unlockDoorInRoom(roomId);
+      console.log(`Unlocked doors in room ${roomId}`);
+    }
+  } else if (command.startsWith('heal player by')) {
+    const match = command.match(/heal player by (\d+)/);
+    if (match) {
+      const amount = parseInt(match[1]);
+      healPlayer(amount);
+      console.log(`Healed player by ${amount}`);
+    }
+  } else if (command.startsWith('damage enemies by')) {
+    const match = command.match(/damage enemies by (\d+)/);
+    if (match) {
+      const amount = parseInt(match[1]);
+      damageEnemies(amount);
+      console.log(`Damaged enemies by ${amount}`);
+    }
+  } else {
+    console.log('Unknown AI command:', command);
+  }
+}
+
+function spawnItem(type, position) {
+  const item = createItem(type, [position[0], 0, position[2]], [0, 0, 0]);
+  item.position.y = 0.5; // Ensure item is above ground
+  items.push(item);
+}
+
+function unlockDoorInRoom(roomId) {
+  const room = dungeon.find((r) => r.id === roomId);
+  if (room) {
+    room.doors.forEach((doorData) => {
+      const door = doors.find((d) => d.to === doorData.to && d.locked);
+      if (door) {
+        door.locked = false;
+        scene.remove(door);
+        const index = doors.indexOf(door);
+        if (index > -1) doors.splice(index, 1);
+      }
+    });
+  }
+}
+
+function healPlayer(amount) {
+  player.health = Math.min(player.health + amount, 100);
+}
+
+function damageEnemies(amount) {
+  for (let i = enemies.length - 1; i >= 0; i--) {
+    const enemy = enemies[i];
+    enemy.health = Math.max(enemy.health - amount, 0);
+    if (enemy.health <= 0) {
+      scene.remove(enemy);
+      enemies.splice(i, 1);
+    }
+  }
+}
+
+// Existing Functions (unchanged for brevity, assume they remain as in the document)
 function generateDungeon(templates) {
-  // Map rooms by ID for easy lookup
   const roomMap = {};
   templates.rooms.forEach((room) => {
     roomMap[room.id] = room;
   });
-
-  // Initialize positions and BFS queue
-  const positions = {};
-  const queue = [];
-  positions[0] = [0, 0, 0]; // Start room at origin
-  queue.push(0);
-
-  // BFS to place rooms based on door connections
+  const positions = { 0: [0, 0, 0] };
+  const queue = [0];
   while (queue.length > 0) {
     const roomId = queue.shift();
     const room = roomMap[roomId];
     const pos = positions[roomId];
-
     for (const door of room.doors) {
       const connectedId = door.to;
       if (!(connectedId in positions)) {
-        // Only place unpositioned rooms
         const connectedRoom = roomMap[connectedId];
         const sizeA = room.size;
         const sizeB = connectedRoom.size;
         let offset;
-
-        // Determine door direction and calculate offset
-        if (door.position[0] === sizeA[0] / 2) {
-          // East
+        if (door.position[0] === sizeA[0] / 2)
           offset = [sizeA[0] / 2 + sizeB[0] / 2, 0, 0];
-        } else if (door.position[0] === -sizeA[0] / 2) {
-          // West
+        else if (door.position[0] === -sizeA[0] / 2)
           offset = [-(sizeA[0] / 2 + sizeB[0] / 2), 0, 0];
-        } else if (door.position[2] === sizeA[1] / 2) {
-          // North
+        else if (door.position[2] === sizeA[1] / 2)
           offset = [0, 0, sizeA[1] / 2 + sizeB[1] / 2];
-        } else if (door.position[2] === -sizeA[1] / 2) {
-          // South
-          offset = [0, 0, -(sizeA[1] / 2 + sizeB[1] / 2)];
-        }
-
-        // Set position of connected room
+        else offset = [0, 0, -(sizeA[1] / 2 + sizeB[1] / 2)];
         positions[connectedId] = [
           pos[0] + offset[0],
           pos[1] + offset[1],
@@ -163,100 +325,15 @@ function generateDungeon(templates) {
       }
     }
   }
-
-  // Create dungeon layout with calculated positions
   const dungeonLayout = templates.rooms.map((room) => ({
     ...room,
     position: positions[room.id],
   }));
-
-  // Build rooms in the scene
   dungeonLayout.forEach((room, index) => {
     room.index = index;
     createRoom(room);
   });
-
   return dungeonLayout;
-}
-
-function createWallSegments(wallDirection, room) {
-  const { name, position, size, axis, doorCheck } = wallDirection;
-  const doorsOnWall = room.doors.filter(doorCheck);
-  console.log(
-    `Room ${room.id} Creating wall ${name} with ${doorsOnWall.length} doors`
-  );
-  if (room.id === 1) console.log(doorsOnWall);
-
-  const min =
-    axis === 'z' ? position[2] - size[2] / 2 : position[0] - size[0] / 2;
-  const max =
-    axis === 'z' ? position[2] + size[2] / 2 : position[0] + size[0] / 2;
-
-  const gapWidth = doorWidth + 2 * player.radius;
-
-  if (doorsOnWall.length === 0) {
-    const wall = new THREE.Mesh(
-      new THREE.BoxGeometry(size[0], size[1], size[2]),
-      wallMaterial
-    );
-    wall.position.set(position[0], position[1], position[2]);
-    scene.add(wall);
-    walls.push(wall);
-  } else {
-    const gaps = doorsOnWall.map((door) => {
-      // Use world coordinates for door position
-      const doorPos =
-        axis === 'z'
-          ? room.position[2] + door.position[2]
-          : room.position[0] + door.position[0];
-      const gapStart = doorPos - gapWidth / 2;
-      const gapEnd = doorPos + gapWidth / 2;
-      return [gapStart, gapEnd];
-    });
-
-    gaps.forEach(([gapStart, gapEnd], index) => {
-      console.log(
-        `Room ${room.id} Wall ${name} Gap ${index}: from ${gapStart} to ${gapEnd}`
-      );
-    });
-    gaps.sort((a, b) => a[0] - b[0]);
-
-    let currentPos = min;
-    for (const [gapStart, gapEnd] of gaps) {
-      if (currentPos < gapStart) {
-        const segmentSize = gapStart - currentPos;
-        const segmentGeometry =
-          axis === 'z'
-            ? new THREE.BoxGeometry(size[0], size[1], segmentSize)
-            : new THREE.BoxGeometry(segmentSize, size[1], size[2]);
-        const wallSegment = new THREE.Mesh(segmentGeometry, wallMaterial);
-        const segmentPos =
-          axis === 'z'
-            ? [position[0], position[1], currentPos + segmentSize / 2]
-            : [currentPos + segmentSize / 2, position[1], position[2]];
-        wallSegment.position.set(segmentPos[0], segmentPos[1], segmentPos[2]);
-        scene.add(wallSegment);
-        walls.push(wallSegment);
-      }
-      currentPos = gapEnd;
-    }
-
-    if (currentPos < max) {
-      const segmentSize = max - currentPos;
-      const segmentGeometry =
-        axis === 'z'
-          ? new THREE.BoxGeometry(size[0], size[1], segmentSize)
-          : new THREE.BoxGeometry(segmentSize, size[1], size[2]);
-      const wallSegment = new THREE.Mesh(segmentGeometry, wallMaterial);
-      const segmentPos =
-        axis === 'z'
-          ? [position[0], position[1], currentPos + segmentSize / 2]
-          : [currentPos + segmentSize / 2, position[1], position[2]];
-      wallSegment.position.set(segmentPos[0], segmentPos[1], segmentPos[2]);
-      scene.add(wallSegment);
-      walls.push(wallSegment);
-    }
-  }
 }
 
 function createRoom(room) {
@@ -266,8 +343,6 @@ function createRoom(room) {
   const centerZ = room.position[2];
   const height = 5;
   const thickness = 0.5;
-
-  // Create the floor
   const floorGeometry = new THREE.PlaneGeometry(width, depth);
   const floor = new THREE.Mesh(
     floorGeometry,
@@ -276,8 +351,6 @@ function createRoom(room) {
   floor.rotation.x = -Math.PI / 2;
   floor.position.set(centerX, 0, centerZ);
   scene.add(floor);
-
-  // Define wall directions
   const wallDirections = [
     {
       name: 'east',
@@ -308,43 +381,32 @@ function createRoom(room) {
       doorCheck: (door) => door.position[2] === -depth / 2,
     },
   ];
-
-  // Create walls with door gaps
   wallDirections.forEach((wallDir) => createWallSegments(wallDir, room));
-
-  // Create door meshes for locked doors only
   room.doors.forEach((doorData) => {
     if (doorData.locked) {
-      const doorGeometry = new THREE.BoxGeometry(doorWidth, 5, 0.5); // Increased depth to 0.5 for visibility
-      const doorMaterial = new THREE.MeshBasicMaterial({ color: 0x885522 });
-      const door = new THREE.Mesh(doorGeometry, doorMaterial);
+      const door = new THREE.Mesh(
+        new THREE.BoxGeometry(doorWidth, 5, 0.5),
+        new THREE.MeshBasicMaterial({ color: 0x885522 })
+      );
       door.position.set(
         room.position[0] + doorData.position[0],
         2.5,
         room.position[2] + doorData.position[2]
       );
-      if (doorData.position[2] !== 0) {
-        door.rotation.y = 0; // North/South walls
-      } else {
-        door.rotation.y = Math.PI / 2; // East/West walls
-      }
+      door.rotation.y = doorData.position[2] !== 0 ? 0 : Math.PI / 2;
       door.locked = true;
       door.to = doorData.to;
       scene.add(door);
       doors.push(door);
-
-      // Add a top plane for visibility from the top-down view
       const doorTop = new THREE.Mesh(
         new THREE.PlaneGeometry(doorWidth, 0.5),
-        new THREE.MeshBasicMaterial({ color: 0xff0000 }) // Red for visibility
+        new THREE.MeshBasicMaterial({ color: 0xff0000 })
       );
-      doorTop.position.set(0, 2.5, 0); // Positioned at the top of the door
-      doorTop.rotation.x = -Math.PI / 2; // Horizontal plane
-      door.add(doorTop); // Attach as a child of the door
+      doorTop.position.set(0, 2.5, 0);
+      doorTop.rotation.x = -Math.PI / 2;
+      door.add(doorTop);
     }
   });
-
-  // Add enemies
   room.enemies.forEach((enemyData) => {
     const enemy = createEnemy(
       enemyData.type,
@@ -354,12 +416,72 @@ function createRoom(room) {
     enemy.room = room;
     enemies.push(enemy);
   });
-
-  // Add items
   room.items.forEach((itemData) => {
     const item = createItem(itemData.type, itemData.position, room.position);
     items.push(item);
   });
+}
+
+function createWallSegments(wallDirection, room) {
+  const { position, size, axis, doorCheck } = wallDirection;
+  const doorsOnWall = room.doors.filter(doorCheck);
+  const min =
+    axis === 'z' ? position[2] - size[2] / 2 : position[0] - size[0] / 2;
+  const max =
+    axis === 'z' ? position[2] + size[2] / 2 : position[0] + size[0] / 2;
+  const gapWidth = doorWidth + 2 * player.radius;
+  if (doorsOnWall.length === 0) {
+    const wall = new THREE.Mesh(
+      new THREE.BoxGeometry(size[0], size[1], size[2]),
+      wallMaterial
+    );
+    wall.position.set(position[0], position[1], position[2]);
+    scene.add(wall);
+    walls.push(wall);
+  } else {
+    const gaps = doorsOnWall.map((door) => {
+      const doorPos =
+        axis === 'z'
+          ? room.position[2] + door.position[2]
+          : room.position[0] + door.position[0];
+      return [doorPos - gapWidth / 2, doorPos + gapWidth / 2];
+    });
+    gaps.sort((a, b) => a[0] - b[0]);
+    let currentPos = min;
+    for (const [gapStart, gapEnd] of gaps) {
+      if (currentPos < gapStart) {
+        const segmentSize = gapStart - currentPos;
+        const segmentGeometry =
+          axis === 'z'
+            ? new THREE.BoxGeometry(size[0], size[1], segmentSize)
+            : new THREE.BoxGeometry(segmentSize, size[1], size[2]);
+        const wallSegment = new THREE.Mesh(segmentGeometry, wallMaterial);
+        const segmentPos =
+          axis === 'z'
+            ? [position[0], position[1], currentPos + segmentSize / 2]
+            : [currentPos + segmentSize / 2, position[1], position[2]];
+        wallSegment.position.set(segmentPos[0], segmentPos[1], segmentPos[2]);
+        scene.add(wallSegment);
+        walls.push(wallSegment);
+      }
+      currentPos = gapEnd;
+    }
+    if (currentPos < max) {
+      const segmentSize = max - currentPos;
+      const segmentGeometry =
+        axis === 'z'
+          ? new THREE.BoxGeometry(size[0], size[1], segmentSize)
+          : new THREE.BoxGeometry(segmentSize, size[1], size[2]);
+      const wallSegment = new THREE.Mesh(segmentGeometry, wallMaterial);
+      const segmentPos =
+        axis === 'z'
+          ? [position[0], position[1], currentPos + segmentSize / 2]
+          : [currentPos + segmentSize / 2, position[1], position[2]];
+      wallSegment.position.set(segmentPos[0], segmentPos[1], segmentPos[2]);
+      scene.add(wallSegment);
+      walls.push(wallSegment);
+    }
+  }
 }
 
 function createEnemy(type, position, roomPosition) {
@@ -408,7 +530,6 @@ window.addEventListener('keydown', (event) => {
 window.addEventListener('keyup', (event) => {
   pressedKeys[event.key.toLowerCase()] = false;
 });
-
 const mouse = new THREE.Vector2();
 let targetPoint = new THREE.Vector3();
 const raycaster = new THREE.Raycaster();
@@ -442,51 +563,42 @@ window.addEventListener('keydown', (event) => {
       player.moveDirection.clone().length() > 0
         ? player.moveDirection
         : player.facingDirection;
-    const dashDistance = 25;
     const newPos = player.mesh.position
       .clone()
-      .add(direction.multiplyScalar(dashDistance));
+      .add(direction.multiplyScalar(25));
     if (checkCollisions(newPos)) player.mesh.position.copy(newPos);
     setTimeout(() => {
       player.isDashing = false;
     }, 500);
   }
-  if (event.key === 'h' && aiCompanion.interventionPoints > 0) {
-    requestAIHelp();
-  }
+  if (event.key === 'h' && aiCompanion.interventionPoints > 0) requestAIHelp();
 });
 
-// Collision detection
 function checkCollisions(newPosition) {
   const playerSphere = new THREE.Sphere(newPosition, player.radius);
   for (const wall of walls) {
-    const wallBox = new THREE.Box3().setFromObject(wall);
-    if (wallBox.intersectsSphere(playerSphere)) return false;
+    if (new THREE.Box3().setFromObject(wall).intersectsSphere(playerSphere))
+      return false;
   }
   for (const door of doors) {
-    if (door.locked) {
-      const doorBox = new THREE.Box3().setFromObject(door);
-      if (doorBox.intersectsSphere(playerSphere)) return false;
-    }
+    if (
+      door.locked &&
+      new THREE.Box3().setFromObject(door).intersectsSphere(playerSphere)
+    )
+      return false;
   }
   return true;
 }
 
-// AI Companion logic
 function requestAIHelp() {
   if (
     aiCompanion.interventionPoints <= 0 ||
     Date.now() - aiCompanion.lastInterventionTime < 5000
   )
     return;
-
-  if (player.health < 30) {
-    spawnHealthPotion(player.mesh.position);
-  } else if (enemies.length > 3) {
-    weakenEnemies();
-  } else {
-    spawnHealthPotion(player.mesh.position); // Default action
-  }
+  if (player.health < 30) spawnHealthPotion(player.mesh.position);
+  else if (enemies.length > 3) weakenEnemies();
+  else spawnHealthPotion(player.mesh.position);
   aiCompanion.interventionPoints--;
   aiCompanion.lastInterventionTime = Date.now();
 }
@@ -502,7 +614,6 @@ function weakenEnemies() {
   });
 }
 
-// Resize renderer
 function resizeRenderer() {
   renderer.setSize(window.innerWidth, window.innerHeight);
   camera.aspect = window.innerWidth / window.innerHeight;
@@ -510,25 +621,21 @@ function resizeRenderer() {
 }
 window.addEventListener('resize', resizeRenderer);
 
-// Animation loop
 let lastTime = Date.now();
-let interacting = false; // Flag to handle interaction
+let interacting = false;
 
 function animate() {
   requestAnimationFrame(animate);
-
   const currentTime = Date.now();
   const deltaTime = (currentTime - lastTime) / 1000;
   lastTime = currentTime;
 
-  // Player movement
   const speed = 5;
   const moveVector = new THREE.Vector3();
   if (pressedKeys['w']) moveVector.z -= 1;
   if (pressedKeys['s']) moveVector.z += 1;
   if (pressedKeys['a']) moveVector.x -= 1;
   if (pressedKeys['d']) moveVector.x += 1;
-
   if (moveVector.length() > 0 && !player.isDashing) {
     moveVector.normalize().multiplyScalar(speed * deltaTime);
     const newPosition = player.mesh.position.clone().add(moveVector);
@@ -539,35 +646,32 @@ function animate() {
   }
   player.moveDirection = moveVector.clone();
 
-  // Player facing
   if (targetPoint) {
-    const direction = targetPoint.clone().sub(player.mesh.position);
-    direction.y = 0;
-    direction.normalize();
+    const direction = targetPoint
+      .clone()
+      .sub(player.mesh.position)
+      .setY(0)
+      .normalize();
     player.mesh.setDirection(direction);
     player.facingDirection = direction.clone();
   }
 
-  // Update current room
   player.currentRoom = dungeon.find((room) => {
     const dx = player.mesh.position.x - room.position[0];
     const dz = player.mesh.position.z - room.position[2];
     return Math.abs(dx) < room.size[0] / 2 && Math.abs(dz) < room.size[1] / 2;
   });
 
-  // Projectiles
   for (let i = projectiles.length - 1; i >= 0; i--) {
     const projectile = projectiles[i];
     projectile.position.add(
       projectile.velocity.clone().multiplyScalar(deltaTime)
     );
-
     for (let j = enemies.length - 1; j >= 0; j--) {
-      const enemy = enemies[j];
-      if (projectile.position.distanceTo(enemy.position) < 0.6) {
-        enemy.health -= 10;
-        if (enemy.health <= 0) {
-          scene.remove(enemy);
+      if (projectile.position.distanceTo(enemies[j].position) < 0.6) {
+        enemies[j].health -= 10;
+        if (enemies[j].health <= 0) {
+          scene.remove(enemies[j]);
           enemies.splice(j, 1);
         }
         scene.remove(projectile);
@@ -575,37 +679,31 @@ function animate() {
         break;
       }
     }
-
     if (currentTime - projectile.creationTime > 1000) {
       scene.remove(projectile);
       projectiles.splice(i, 1);
     }
   }
 
-  // Item pickup
   for (let i = items.length - 1; i >= 0; i--) {
-    const item = items[i];
-    if (player.mesh.position.distanceTo(item.position) < 0.7) {
-      player.inventory.push(item.type);
-      if (item.type === 'potion')
+    if (player.mesh.position.distanceTo(items[i].position) < 0.7) {
+      player.inventory.push(items[i].type);
+      if (items[i].type === 'potion')
         player.health = Math.min(player.health + 20, 100);
-      scene.remove(item);
+      scene.remove(items[i]);
       items.splice(i, 1);
     }
   }
 
-  // Door interaction
   if (pressedKeys['e'] && !interacting) {
     interacting = true;
     doors.forEach((door) => {
       if (player.mesh.position.distanceTo(door.position) < 3.5 && door.locked) {
-        console.log('Interacting with doors');
         if (player.inventory.includes('key')) {
           door.locked = false;
           scene.remove(door);
           const index = doors.indexOf(door);
           if (index > -1) doors.splice(index, 1);
-          // Remove key from inventory
           const keyIndex = player.inventory.indexOf('key');
           if (keyIndex > -1) player.inventory.splice(keyIndex, 1);
         } else {
@@ -613,14 +711,7 @@ function animate() {
         }
       }
     });
-  } else if (!pressedKeys['e']) {
-    interacting = false;
-  }
-
-  // Enemy AI (simple chase for non-boss enemies)
-  const attackCooldown = 1000; // milliseconds
-  const attackRange = 1.5;
-  const attackDamage = 5;
+  } else if (!pressedKeys['e']) interacting = false;
 
   enemies.forEach((enemy) => {
     if (
@@ -628,61 +719,54 @@ function animate() {
       enemy.health > 0 &&
       enemy.type !== 'boss'
     ) {
-      // Movement
       const direction = player.mesh.position
         .clone()
         .sub(enemy.position)
         .normalize();
       enemy.position.add(direction.multiplyScalar(2 * deltaTime));
-
-      // Attack
-      const distance = player.mesh.position.distanceTo(enemy.position);
       if (
-        distance < attackRange &&
-        currentTime - enemy.lastAttackTime > attackCooldown
+        player.mesh.position.distanceTo(enemy.position) < 1.5 &&
+        currentTime - enemy.lastAttackTime > 1000
       ) {
-        player.health -= attackDamage;
+        player.health -= 5;
         enemy.lastAttackTime = currentTime;
       }
     }
   });
 
-  // Boss AI
   if (boss && boss.health > 0 && boss.room === player.currentRoom) {
     if (boss.health > 70) {
-      // Phase 1: Invulnerable (simplified, no switches yet)
+      // Phase 1
     } else if (boss.health > 30) {
-      // Phase 2: Chase and attack
-      const direction = player.mesh.position
-        .clone()
-        .sub(boss.position)
-        .normalize();
-      boss.position.add(direction.multiplyScalar(3 * deltaTime));
+      boss.position.add(
+        player.mesh.position
+          .clone()
+          .sub(boss.position)
+          .normalize()
+          .multiplyScalar(3 * deltaTime)
+      );
     } else {
-      // Phase 3: Enraged
-      const direction = player.mesh.position
-        .clone()
-        .sub(boss.position)
-        .normalize();
-      boss.position.add(direction.multiplyScalar(5 * deltaTime));
+      boss.position.add(
+        player.mesh.position
+          .clone()
+          .sub(boss.position)
+          .normalize()
+          .multiplyScalar(5 * deltaTime)
+      );
     }
-    if (player.mesh.position.distanceTo(boss.position) < 1.5) {
+    if (player.mesh.position.distanceTo(boss.position) < 1.5)
       player.health -= 10 * deltaTime;
-    }
   }
 
-  // Camera follows player
   camera.position.set(player.mesh.position.x, 10, player.mesh.position.z);
   camera.lookAt(player.mesh.position.x, 0, player.mesh.position.z);
 
-  // Check win/lose conditions
   if (player.health <= 0) console.log('Game Over');
   if (boss && boss.health <= 0) console.log('You Win!');
 
   renderer.render(scene, camera);
 }
 
-// Initialize dungeon and start game
 dungeon = generateDungeon(dungeonTemplates);
 resizeRenderer();
 animate();
