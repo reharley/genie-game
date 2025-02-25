@@ -5,61 +5,92 @@ import './style.css';
 const doorWidth = 2;
 const wallMaterial = new THREE.MeshBasicMaterial({ color: 0x555555 });
 
-// Scene setup
-const scene = new THREE.Scene();
-const camera = new THREE.PerspectiveCamera(
-  75,
-  window.innerWidth / window.innerHeight,
-  0.1,
-  1000
-);
-const renderer = new THREE.WebGLRenderer();
-renderer.setSize(window.innerWidth, window.innerHeight);
-document.body.appendChild(renderer.domElement);
-camera.position.set(0, 10, 0);
-camera.lookAt(0, 0, 0);
-
-// Player
-const player = {
-  mesh: new THREE.ArrowHelper(
-    new THREE.Vector3(0, 0, 1),
-    new THREE.Vector3(0, 0, 0),
-    1,
-    0x00ff00
+const game = {
+  scene: new THREE.Scene(),
+  camera: new THREE.PerspectiveCamera(
+    75,
+    window.innerWidth / window.innerHeight,
+    0.1,
+    1000
   ),
-  animations: [], // Present once the model is loaded
-  mixer: null, // Present once the model is loaded
-  health: 100,
-  inventory: ['sword', 'genie lamp'],
-  lastCastTime: null,
-  radius: 0.5,
-  position: new THREE.Vector3(0, 0.1, 0),
-  moveDirection: new THREE.Vector3(),
-  facingDirection: new THREE.Vector3(0, 0, 1),
-  currentRoom: null,
+  renderer: new THREE.WebGLRenderer(),
+  player: {
+    mesh: new THREE.ArrowHelper(
+      new THREE.Vector3(0, 0, 1),
+      new THREE.Vector3(0, 0, 0),
+      1,
+      0x00ff00
+    ),
+    animations: [],
+    mixer: null,
+    health: 100,
+    inventory: ['sword', 'genie lamp'],
+    lastCastTime: null,
+    radius: 0.5,
+    position: new THREE.Vector3(0, 0.1, 0),
+    moveDirection: new THREE.Vector3(),
+    facingDirection: new THREE.Vector3(0, 0, 1),
+    currentRoom: null,
+  },
+  aiCompanion: {
+    interventionPoints: 3,
+    lastInterventionTime: Date.now(),
+  },
+  walls: [],
+  enemies: [],
+  items: [],
+  projectiles: [],
+  doors: [],
+  dungeon: [],
+  boss: null,
+  gameOver: false,
+  idCounter: 0,
+  generateUniqueId: function () {
+    return this.idCounter++;
+  },
+  createItem: function (type, position, roomPosition) {
+    const geometry = new THREE.SphereGeometry(0.2, 8, 8);
+    const material = new THREE.MeshBasicMaterial({
+      color: type === 'key' ? 0xffff00 : 0xff5555,
+    });
+    const mesh = new THREE.Mesh(geometry, material);
+    mesh.position.set(
+      roomPosition[0] + position[0],
+      position[1],
+      roomPosition[2] + position[2]
+    );
+    const item = { id: this.generateUniqueId(), mesh, type };
+    this.scene.add(mesh);
+    return item;
+  },
+  spawnItemAt: function (type, position) {
+    const item = this.createItem(
+      type,
+      [position.x, 0.5, position.z],
+      [0, 0, 0]
+    );
+    this.items.push(item);
+  },
 };
+
+// Initialize renderer and camera
+game.renderer.setSize(window.innerWidth, window.innerHeight);
+document.body.appendChild(game.renderer.domElement);
+game.camera.position.set(0, 10, 0);
+game.camera.lookAt(0, 0, 0);
+
+// Load player model
 loadMeshGLTFModel(
   'https://novelscapestorage.blob.core.windows.net/game-assets/char.glb',
-  scene,
-  player
+  game.scene,
+  game.player
 );
-player.mesh.position.copy(player.position);
-
+game.player.mesh.position.copy(game.player.position);
 // AI Companion
 const aiCompanion = {
   interventionPoints: 3,
   lastInterventionTime: Date.now(),
 };
-
-// Game objects
-const walls = [];
-const enemies = [];
-const items = [];
-const projectiles = [];
-const doors = [];
-let dungeon = [];
-let boss = null;
-let gameOver = false;
 
 let idCounter = 0;
 function generateUniqueId() {
@@ -67,11 +98,13 @@ function generateUniqueId() {
 }
 
 function updatePlayerUI() {
+  const { player } = game;
   document.getElementById('health').innerText = `Health: ${player.health}`;
   document.getElementById(
     'inventory'
   ).innerText = `Inventory: ${player.inventory.join(', ')}`;
 }
+
 function addMessageToChatLog(sender, message) {
   const chatMessages = document.getElementById('chat-messages');
   const chatLogContainer = document.getElementById('chat-log');
@@ -85,6 +118,7 @@ function addMessageToChatLog(sender, message) {
   chatMessages.appendChild(messageElement);
   chatLogContainer.scrollTop = chatLogContainer.scrollHeight;
 }
+
 function createEnemyHealthBar(enemy) {
   const healthBar = document.createElement('div');
   healthBar.className = 'enemy-health-bar';
@@ -92,7 +126,9 @@ function createEnemyHealthBar(enemy) {
   document.body.appendChild(healthBar);
   enemy.healthBar = healthBar; // Attach health bar to enemy object
 }
+
 function updateEnemyHealthBars() {
+  const { camera, enemies } = game;
   enemies.forEach((enemy) => {
     if (enemy.healthBar) {
       // Update health
@@ -110,6 +146,7 @@ function updateEnemyHealthBars() {
   });
 }
 function removeEnemyHealthBars() {
+  const { enemies } = game;
   enemies.forEach((enemy) => {
     if (enemy.healthBar) {
       document.body.removeChild(enemy.healthBar);
@@ -117,7 +154,7 @@ function removeEnemyHealthBars() {
     }
   });
 }
-// Dungeon JSON
+
 const dungeonTemplates = {
   rooms: [
     {
@@ -171,7 +208,6 @@ const dungeonTemplates = {
   ],
 };
 
-// **Voice Recognition Setup**
 const recognition = new (window.SpeechRecognition ||
   window.webkitSpeechRecognition)();
 recognition.lang = 'en-US';
@@ -188,28 +224,11 @@ window.addEventListener('keydown', (event) => {
 });
 
 function executeScript(script) {
-  const context = {
-    player, // Player object
-    enemies, // Array of enemies
-    items, // Array of items
-    projectiles, // Array of projectiles
-    doors, // Array of doors
-    dungeon, // Array of room objects
-    boss, // Boss object (null if no boss)
-    scene, // THREE.js scene
-    createItem, // Function to create items
-    spawnItemAt: (type, position) => {
-      const item = createItem(type, [position.x, 0.5, position.z], [0, 0, 0]);
-      items.push(item);
-      scene.add(item);
-    },
-  };
   try {
-    const newScript = script;
     console.log('Executing AI script:');
-    console.log(newScript);
-    const func = new Function('context', newScript);
-    func(context);
+    console.log(script);
+    const func = new Function('game', script);
+    func(game);
   } catch (error) {
     console.error('Error executing AI script:', error);
   }
@@ -385,6 +404,7 @@ const { player, enemies, items, projectiles, doors, dungeon, boss, scene, create
 }
 
 function resetGame() {
+  const { player, enemies, items, projectiles, doors, scene, dungeon } = game;
   // Reset player
   player.health = 100;
   player.position.set(0, 0.1, 0);
@@ -398,7 +418,7 @@ function resetGame() {
   removeEnemyHealthBars();
 
   enemies.length = 0;
-  boss = null;
+  game.boss = null;
 
   // Remove all items
   items.forEach((item) => scene.remove(item.mesh));
@@ -468,7 +488,7 @@ function resetGame() {
   aiCompanion.interventionPoints = 3;
   aiCompanion.lastInterventionTime = Date.now();
 
-  gameOver = false;
+  game.gameOver = false;
   animate();
 }
 
@@ -518,6 +538,7 @@ function generateDungeon(templates) {
 }
 
 function createRoom(room) {
+  const { scene, doors, enemies, items } = game;
   const width = room.size[0];
   const depth = room.size[1];
   const centerX = room.position[0];
@@ -610,6 +631,7 @@ function createRoom(room) {
 }
 
 function createWallSegments(wallDirection, room) {
+  const { player, scene, walls } = game;
   const { position, size, axis, doorCheck } = wallDirection;
   const doorsOnWall = room.doors.filter(doorCheck);
   const min =
@@ -672,6 +694,7 @@ function createWallSegments(wallDirection, room) {
 }
 
 function getCurrentGameState() {
+  const { player, enemies, items, projectiles, doors, boss } = game;
   const currentRoom = player.currentRoom;
   const roomState = {
     id: currentRoom.id,
@@ -758,6 +781,7 @@ function getCurrentGameState() {
 }
 
 function createEnemy(type, position, roomPosition) {
+  const { scene, boss } = game;
   const geometry =
     type === 'boss'
       ? new THREE.BoxGeometry(2, 2, 2)
@@ -782,11 +806,12 @@ function createEnemy(type, position, roomPosition) {
   };
   scene.add(mesh);
   createEnemyHealthBar(enemy);
-  if (type === 'boss') boss = enemy;
+  if (type === 'boss') game.boss = enemy;
   return enemy;
 }
 
 function createItem(type, position, roomPosition) {
+  const { scene } = game;
   const geometry = new THREE.SphereGeometry(0.2, 8, 8);
   const material = new THREE.MeshBasicMaterial({
     color: type === 'key' ? 0xffff00 : 0xff5555,
@@ -820,6 +845,7 @@ const raycaster = new THREE.Raycaster();
 const plane = new THREE.Plane(new THREE.Vector3(0, 1, 0), 0);
 
 window.addEventListener('mousemove', (event) => {
+  const { camera } = game;
   mouse.x = (event.clientX / window.innerWidth) * 2 - 1;
   mouse.y = -(event.clientY / window.innerHeight) * 2 + 1;
   raycaster.setFromCamera(mouse, camera);
@@ -827,6 +853,7 @@ window.addEventListener('mousemove', (event) => {
 });
 
 window.addEventListener('mousedown', (event) => {
+  const { player, scene, projectiles } = game;
   if (event.button === 0) {
     const mesh = new THREE.Mesh(
       new THREE.SphereGeometry(0.1, 8, 8),
@@ -864,6 +891,7 @@ window.addEventListener('keydown', (event) => {
 });
 
 function checkCollisions(newPosition) {
+  const { player, walls, doors } = game;
   const playerSphere = new THREE.Sphere(newPosition, player.radius);
   for (const wall of walls) {
     if (new THREE.Box3().setFromObject(wall).intersectsSphere(playerSphere))
@@ -904,6 +932,7 @@ function weakenEnemies() {
 }
 
 function resizeRenderer() {
+  const { renderer, camera } = game;
   renderer.setSize(window.innerWidth, window.innerHeight);
   camera.aspect = window.innerWidth / window.innerHeight;
   camera.updateProjectionMatrix();
@@ -917,12 +946,26 @@ function showGameOverUI(message) {
   document.getElementById('restart-button').addEventListener('click', () => {
     resetGame();
     gameOverUI.style.display = 'none';
-    gameOver = false;
+    game.gameOver = false;
   });
   document.getElementById('game-over-message').innerText = message;
   gameOverUI.style.display = 'flex';
 }
+
 function animate() {
+  const {
+    player,
+    gameOver,
+    enemies,
+    renderer,
+    projectiles,
+    items,
+    doors,
+    boss,
+    camera,
+    scene,
+    dungeon,
+  } = game;
   if (gameOver) {
     renderer.render(scene, camera);
     return;
@@ -1101,17 +1144,17 @@ function animate() {
   updateEnemyHealthBars();
 
   if (player.health <= 0) {
-    gameOver = true;
+    game.gameOver = true;
     showGameOverUI('Game Over!');
   }
   if (boss && boss.health <= 0) {
-    gameOver = true;
+    game.gameOver = true;
     showGameOverUI('You Win!');
   }
 
   renderer.render(scene, camera);
 }
 
-dungeon = generateDungeon(dungeonTemplates);
+game.dungeon = generateDungeon(dungeonTemplates);
 resizeRenderer();
 animate();
