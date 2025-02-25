@@ -122,6 +122,32 @@ window.addEventListener('keydown', (event) => {
   }
 });
 
+function executeScript(script) {
+  const context = {
+    player, // Player object
+    enemies, // Array of enemies
+    items, // Array of items
+    projectiles, // Array of projectiles
+    doors, // Array of doors
+    dungeon, // Array of room objects
+    boss, // Boss object (null if no boss)
+    scene, // THREE.js scene
+    createItem, // Function to create items
+    spawnItemAt: (type, position) => {
+      const item = createItem(type, [position.x, 0.5, position.z], [0, 0, 0]);
+      items.push(item);
+      scene.add(item);
+    },
+  };
+  try {
+    const newScript = `const { player, enemies, items, projectiles, doors, dungeon, boss, scene, createItem, spawnItemAt } = context;\n${script}`;
+    const func = new Function('context', newScript);
+    func(context);
+  } catch (error) {
+    console.error('Error executing AI script:', error);
+  }
+}
+
 recognition.onresult = (event) => {
   const transcript = event.results[0][0].transcript;
   console.log('Voice command:', transcript);
@@ -138,20 +164,26 @@ recognition.onerror = (event) => {
   listening = false;
 };
 
-// **AI Integration**
 async function sendToAI(transcript) {
+  const gameState = getCurrentGameState();
   const prompt = `
 You are an AI assistant named Genie in a roguelike game.
 
-The player is in room ${player.currentRoom.id}, health: ${
-    player.health
-  }, inventory: ${player.inventory.join(
-    ', '
-  )}. The player said: "${transcript}".
-Provide a command to manipulate the game state. Or answer a question.`;
+Current game state:
+${JSON.stringify(gameState, null, 2)}
+
+The player said: "${transcript}".
+Provide a command to manipulate the game state or answer the question.`;
   const response = await callAIAPI(prompt);
   console.log('AI response:', response);
-  executeAICommand(response);
+  if (response && response.type === 'js_game_script') {
+    executeScript(response.response);
+  } else if (response && response.type === 'agent_response') {
+    console.log('AI says:', response.response);
+    // Optionally, display to player in a UI if added later
+  } else {
+    console.log('Invalid or no response from AI');
+  }
 }
 
 async function callAIAPI(prompt) {
@@ -186,9 +218,44 @@ async function callAIAPI(prompt) {
           properties: {
             type: {
               type: 'string',
-              enum: ['agent_response', 'new_game_state', 'js_game_script'],
-              description:
-                'Possible types of responses that can be generated. Only generate js to manipulate the game state when generating a script.',
+              enum: [
+                'agent_response',
+                // 'new_game_state',
+                'js_game_script',
+              ],
+              description: `Possible types of responses that can be generated.
+Only generate js to manipulate the game state when generating a script.
+When generating a script always use ids to reference objects.
+Use direct manipulation when editing the game state.
+Here is the function executing the script:
+\`\`\`javascript
+function executeScript(script) {
+  const context = {
+    player, // Player object
+    enemies, // Array of enemies
+    items, // Array of items
+    projectiles, // Array of projectiles
+    doors, // Array of doors
+    dungeon, // Array of room objects
+    boss, // Boss object (null if no boss)
+    scene, // THREE.js scene
+    createItem, // Function to create items
+    spawnItemAt: (type, position) => {
+      const item = createItem(type, [position.x, 0.5, position.z], [0, 0, 0]);
+      items.push(item);
+      scene.add(item);
+    },
+  };
+  try {
+    let newScript = \`const { player, enemies, items, projectiles, doors, dungeon, boss, scene, createItem, spawnItemAt } = context;\n$ {script}\`;
+    const func = new Function('context', newScript);
+    func(context);
+  } catch (error) {
+    console.error('Error executing AI script:', error);
+  }
+}
+\`\`\`
+`,
             },
             response: {
               type: 'string',
@@ -212,7 +279,7 @@ async function callAIAPI(prompt) {
         functions,
         function_call: { name: 'game_master' },
         messages: [{ role: 'user', content: prompt }],
-        max_tokens: 50,
+        // max_tokens: 50,
       }),
     });
     const data = await response.json();
@@ -232,85 +299,6 @@ async function callAIAPI(prompt) {
     }
   }
 }
-
-function executeAICommand(command) {
-  if (command.startsWith('spawn')) {
-    const match = command.match(/spawn (\w+) at (\w+|\d+,\d+,\d+)/);
-    if (match) {
-      const itemType = match[1];
-      let position;
-      if (match[2] === 'player') {
-        position = [player.mesh.position.x, 0.5, player.mesh.position.z];
-      } else {
-        const coords = match[2].split(',').map(Number);
-        position = [coords[0], 0.5, coords[2]];
-      }
-      spawnItem(itemType, position);
-      console.log(`Spawned ${itemType} at [${position}]`);
-    }
-  } else if (command.startsWith('unlock door in room')) {
-    const match = command.match(/unlock door in room (\d+)/);
-    if (match) {
-      const roomId = parseInt(match[1]);
-      unlockDoorInRoom(roomId);
-      console.log(`Unlocked doors in room ${roomId}`);
-    }
-  } else if (command.startsWith('heal player by')) {
-    const match = command.match(/heal player by (\d+)/);
-    if (match) {
-      const amount = parseInt(match[1]);
-      healPlayer(amount);
-      console.log(`Healed player by ${amount}`);
-    }
-  } else if (command.startsWith('damage enemies by')) {
-    const match = command.match(/damage enemies by (\d+)/);
-    if (match) {
-      const amount = parseInt(match[1]);
-      damageEnemies(amount);
-      console.log(`Damaged enemies by ${amount}`);
-    }
-  } else {
-    console.log('Unknown AI command:', command);
-  }
-}
-
-function spawnItem(type, position) {
-  const item = createItem(type, [position[0], 0, position[2]], [0, 0, 0]);
-  item.position.y = 0.5; // Ensure item is above ground
-  items.push(item);
-}
-
-function unlockDoorInRoom(roomId) {
-  const room = dungeon.find((r) => r.id === roomId);
-  if (room) {
-    room.doors.forEach((doorData) => {
-      const door = doors.find((d) => d.to === doorData.to && d.locked);
-      if (door) {
-        door.locked = false;
-        scene.remove(door);
-        const index = doors.indexOf(door);
-        if (index > -1) doors.splice(index, 1);
-      }
-    });
-  }
-}
-
-function healPlayer(amount) {
-  player.health = Math.min(player.health + amount, 100);
-}
-
-function damageEnemies(amount) {
-  for (let i = enemies.length - 1; i >= 0; i--) {
-    const enemy = enemies[i];
-    enemy.health = Math.max(enemy.health - amount, 0);
-    if (enemy.health <= 0) {
-      scene.remove(enemy);
-      enemies.splice(i, 1);
-    }
-  }
-}
-
-// Existing Functions (unchanged for brevity, assume they remain as in the document)
 function generateDungeon(templates) {
   const roomMap = {};
   templates.rooms.forEach((room) => {
@@ -502,6 +490,75 @@ function createWallSegments(wallDirection, room) {
       walls.push(wallSegment);
     }
   }
+}
+
+function getCurrentGameState() {
+  // Get the player's current room
+  const currentRoom = player.currentRoom;
+
+  // Gather room state
+  const roomState = {
+    id: currentRoom.id,
+    type: currentRoom.type,
+    size: currentRoom.size,
+    enemies: enemies
+      .filter((e) => e.room === currentRoom)
+      .map((e) => ({
+        type: e.type,
+        position: [e.position.x, e.position.y, e.position.z],
+        health: e.health,
+      })),
+    items: items
+      .filter((item) => {
+        // Determine if item is in current room bounds
+        const dx = item.position.x - currentRoom.position[0];
+        const dz = item.position.z - currentRoom.position[2];
+        return (
+          Math.abs(dx) < currentRoom.size[0] / 2 &&
+          Math.abs(dz) < currentRoom.size[1] / 2
+        );
+      })
+      .map((item) => ({
+        type: item.type,
+        position: [item.position.x, item.position.y, item.position.z],
+      })),
+    doors: currentRoom.doors.map((doorData) => {
+      const door = doors.find((d) => d.to === doorData.to);
+      return {
+        to: doorData.to,
+        position: [
+          currentRoom.position[0] + doorData.position[0],
+          doorData.position[1],
+          currentRoom.position[2] + doorData.position[2],
+        ],
+        locked: door ? door.locked : false,
+      };
+    }),
+  };
+
+  // Gather player state
+  const playerState = {
+    position: [player.position.x, player.position.y, player.position.z],
+    health: player.health,
+    inventory: player.inventory,
+    currentRoom: currentRoom.id,
+  };
+
+  // Initialize game state object
+  const gameState = {
+    player: playerState,
+    currentRoom: roomState,
+  };
+
+  // Include boss state if player is in boss room
+  if (boss && boss.room === currentRoom) {
+    gameState.boss = {
+      position: [boss.position.x, boss.position.y, boss.position.z],
+      health: boss.health,
+    };
+  }
+
+  return gameState;
 }
 
 function createEnemy(type, position, roomPosition) {
