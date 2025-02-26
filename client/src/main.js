@@ -1,7 +1,8 @@
 import * as THREE from 'three';
 import { loadMeshGLTFModel } from './loader';
-import './style.css';
+import { callAIAPI } from './utils/ai';
 
+import './style.css';
 const doorWidth = 2;
 const wallMaterial = new THREE.MeshBasicMaterial({ color: 0x555555 });
 
@@ -271,135 +272,6 @@ Provide a command to manipulate the game state or answer the question.`;
     // Optionally, display to player in a UI if added later
   } else {
     console.log('Invalid or no response from AI');
-  }
-}
-
-async function callAIAPI(prompt) {
-  const mock = false; // Set to true to use mock API response
-  if (mock) {
-    // Mock API call (replace with actual GPT-4o-mini API endpoint)
-    // In practice, use fetch() with your API key and endpoint
-    return new Promise((resolve) => {
-      setTimeout(() => {
-        // Simulate AI response based on transcript (for demo purposes)
-        if (prompt.includes('need a key') || prompt.includes('spawn a key')) {
-          resolve(`spawn key at player`);
-        } else if (prompt.includes('unlock the door')) {
-          resolve(`unlock door in room ${player.currentRoom.id}`);
-        } else if (prompt.includes('heal me')) {
-          resolve(`heal player by 20`);
-        } else if (prompt.includes('hurt enemies')) {
-          resolve(`damage enemies by 10`);
-        } else {
-          resolve(`spawn potion at player`);
-        }
-      }, 500);
-    });
-  } else {
-    const functions = [
-      {
-        name: 'game_master',
-        description:
-          'Answers questions and provides commands to manipulate the game state.',
-        parameters: {
-          type: 'object',
-          properties: {
-            type: {
-              type: 'string',
-              enum: [
-                'agent_response',
-                // 'new_game_state',
-                'js_game_script',
-              ],
-              description: `Possible types of responses that can be generated.
-Only generate js to manipulate the game state when generating a script.
-When generating a script always use ids to reference objects.
-Use direct manipulation when editing the game state.
-All the objects are three js objects in a scene. When altering the scene make sure to add and remove objects from the scene.
-
-Here's a sample script removing an object from the scene:
-\`\`\`javascript
-const key = items.find(item => item.id === 3);
-if (key) {
-    player.inventory.push(key.type);
-    items.splice(items.indexOf(key), 1);
-    scene.remove(key.mesh);
-}
-\`\`\`
-Here is the function executing the script:
-\`\`\`javascript
-function executeScript(script) {
-  const context = {
-    player, // Player object
-    enemies, // Array of enemies
-    items, // Array of items
-    projectiles, // Array of projectiles
-    doors, // Array of doors
-    dungeon, // Array of room objects
-    boss, // Boss object (null if no boss)
-    scene, // THREE.js scene
-    createItem, // Function to create items
-    spawnItemAt: (type, position) => {
-      const item = createItem(type, [position.x, 0.5, position.z], [0, 0, 0]);
-      items.push(item);
-      scene.add(item);
-    },
-  };
-  try {
-    let newScript = \`const { player, enemies, items, projectiles, doors, dungeon, boss, scene, createItem, spawnItemAt } = context;\n$ {script}\`;
-    const func = new Function('context', newScript);
-    func(context);
-  } catch (error) {
-    console.error('Error executing AI script:', error);
-  }
-}
-\`\`\`
-The code should always begin with the following line:
-\`\`\`javascript
-const { player, enemies, items, projectiles, doors, dungeon, boss, scene, createItem, spawnItemAt } = context;
-\`\`\`
-`,
-            },
-            response: {
-              type: 'string',
-              description:
-                'The response that will be used. This will be used based on which type is selected.',
-            },
-          },
-          required: ['type', 'response'],
-        },
-      },
-    ];
-    const apiKey = import.meta.env.VITE_OPENAI_API_KEY;
-    const response = await fetch('https://api.openai.com/v1/chat/completions', {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        Authorization: `Bearer ${apiKey}`,
-      },
-      body: JSON.stringify({
-        model: 'gpt-4o-mini',
-        functions,
-        function_call: { name: 'game_master' },
-        messages: [{ role: 'user', content: prompt }],
-        // max_tokens: 50,
-      }),
-    });
-    const data = await response.json();
-    const message = data.choices[0]?.message;
-    try {
-      if (message?.function_call?.name === 'game_master') {
-        const args = JSON.parse(message.function_call.arguments);
-        if (!args.type || !args.response) {
-          throw new Error('Incomplete prompt data received from OpenAI.');
-        }
-        return args;
-      } else {
-        throw new Error('No function call was made by the assistant.');
-      }
-    } catch (error) {
-      console.error('Error with prompts:', error.message);
-    }
   }
 }
 
